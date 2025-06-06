@@ -31,23 +31,6 @@ func MakeClerk(clnt *tester.Clnt, server string) kvtest.IKVClerk {
 // arguments. Additionally, reply must be passed as a pointer.
 func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 	// You will have to modify this function.
-	// =========================For Lab2A=============================
-	// getArgs := rpc.GetArgs{
-	// 	Key: key,
-	// }
-
-	// replyArgs := rpc.GetReply{}
-
-	// ok := ck.clnt.Call(ck.server, "KVServer.Get", &getArgs, &replyArgs)
-	// if !ok {
-	// 	return "", 0, rpc.ErrNoKey
-	// }
-
-	// return replyArgs.Value, replyArgs.Version, replyArgs.Err
-
-	// =========================For Lab2A=============================
-	// shouldRetry := false
-
 	getArgs := rpc.GetArgs{
 		Key: key,
 	}
@@ -89,23 +72,6 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 // arguments. Additionally, reply must be passed as a pointer.
 func (ck *Clerk) Put(key, value string, version rpc.Tversion) rpc.Err {
 	// You will have to modify this function.
-	// ============================For Lab2A==========================
-	// args := rpc.PutArgs{
-	// 	Key:     key,
-	// 	Value:   value,
-	// 	Version: version,
-	// }
-
-	// reply := rpc.PutReply{}
-
-	// ok := ck.clnt.Call(ck.server, "KVServer.Put", &args, &reply)
-	// if !ok {
-	// 	return rpc.ErrNoKey
-	// }
-
-	// return reply.Err
-
-	//=============================For Lab2C==========================
 	shouldRetry := false
 
 	args := rpc.PutArgs{

@@ -46,15 +46,11 @@ func (lk *Lock) Acquire() {
 		val, ver, err := lk.ck.Get(lk.lock)
 		// Get err = rpc.OK
 		if err == rpc.OK {
-			if val != "" {
+			if val != "" && val != lk.lockId {
 				// Someone else is holding lock
 				continue
 			}
 			lk.lockVersion = ver
-		}
-
-		if err == rpc.ErrNoKey && ver != 0 {
-			panic("Namnh can't be!!!")
 		}
 
 		if lk.ck.Put(lk.lock, lk.lockId /*version*/, lk.lockVersion) == rpc.OK {
