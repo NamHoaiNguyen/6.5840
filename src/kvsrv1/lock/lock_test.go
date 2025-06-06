@@ -2,14 +2,15 @@ package lock
 
 import (
 	"fmt"
+
 	//	"log"
 	"strconv"
 	"testing"
 	"time"
 
-	"6.5840/kvsrv1"
+	kvsrv "6.5840/kvsrv1"
 	"6.5840/kvsrv1/rpc"
-	"6.5840/kvtest1"
+	kvtest "6.5840/kvtest1"
 )
 
 const (
@@ -57,6 +58,7 @@ func oneClient(t *testing.T, me int, ck kvtest.IKVClerk, done chan struct{}) kvt
 			lk.Release()
 		}
 	}
+
 	return kvtest.ClntRes{}
 }
 

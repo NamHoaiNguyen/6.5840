@@ -45,6 +45,7 @@ func (kv *KVServer) Get(args *rpc.GetArgs, reply *rpc.GetReply) {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
+	// Get data
 	if value, ok := kv.data[args.Key]; ok {
 		reply.Value = value.Value
 		reply.Version = rpc.Tversion(value.Version)
