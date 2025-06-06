@@ -1,7 +1,6 @@
 package lock
 
 import (
-	"fmt"
 	"time"
 
 	"6.5840/kvsrv1/rpc"
@@ -49,20 +48,16 @@ func (lk *Lock) Acquire() {
 		if err == rpc.OK {
 			if val != "" {
 				// Someone else is holding lock
-				time.Sleep(10 * time.Millisecond)
+				continue
 			}
 			lk.lockVersion = ver
 		}
 
-		if err == rpc.ErrNoKey {
-			lk.lockVersion = 0
+		if err == rpc.ErrNoKey && ver != 0 {
+			panic("Namnh can't be!!!")
 		}
 
-		// fmt.Printf("Status of err: %s, Status of val: %s\n", err, val)
-
 		if lk.ck.Put(lk.lock, lk.lockId /*version*/, lk.lockVersion) == rpc.OK {
-			fmt.Println("Namnh check lock should put")
-			// lk.lockVersion++
 			return
 		}
 
@@ -71,12 +66,8 @@ func (lk *Lock) Acquire() {
 }
 
 func (lk *Lock) Release() {
-	// time.Sleep(2000 * time.Millisecond)
-
 	val, ver, err := lk.ck.Get(lk.lock)
 	if err == rpc.OK && val == lk.lockId {
-		// fmt.Println("Namnh check lock should be released")
-
 		lk.ck.Put(lk.lock, "", ver)
 	}
 }
