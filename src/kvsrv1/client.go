@@ -1,6 +1,8 @@
 package kvsrv
 
 import (
+	"time"
+
 	"6.5840/kvsrv1/rpc"
 	kvtest "6.5840/kvtest1"
 	tester "6.5840/tester1"
@@ -29,6 +31,23 @@ func MakeClerk(clnt *tester.Clnt, server string) kvtest.IKVClerk {
 // arguments. Additionally, reply must be passed as a pointer.
 func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 	// You will have to modify this function.
+	// =========================For Lab2A=============================
+	// getArgs := rpc.GetArgs{
+	// 	Key: key,
+	// }
+
+	// replyArgs := rpc.GetReply{}
+
+	// ok := ck.clnt.Call(ck.server, "KVServer.Get", &getArgs, &replyArgs)
+	// if !ok {
+	// 	return "", 0, rpc.ErrNoKey
+	// }
+
+	// return replyArgs.Value, replyArgs.Version, replyArgs.Err
+
+	// =========================For Lab2A=============================
+	// shouldRetry := false
+
 	getArgs := rpc.GetArgs{
 		Key: key,
 	}
@@ -37,7 +56,15 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 
 	ok := ck.clnt.Call(ck.server, "KVServer.Get", &getArgs, &replyArgs)
 	if !ok {
-		return "", 0, rpc.ErrNoKey
+		for {
+			// shouldRetry = true
+			time.Sleep(100 * time.Millisecond)
+
+			ok = ck.clnt.Call(ck.server, "KVServer.Get", &getArgs, &replyArgs)
+			if ok {
+				break
+			}
+		}
 	}
 
 	return replyArgs.Value, replyArgs.Version, replyArgs.Err
@@ -62,6 +89,25 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 // arguments. Additionally, reply must be passed as a pointer.
 func (ck *Clerk) Put(key, value string, version rpc.Tversion) rpc.Err {
 	// You will have to modify this function.
+	// ============================For Lab2A==========================
+	// args := rpc.PutArgs{
+	// 	Key:     key,
+	// 	Value:   value,
+	// 	Version: version,
+	// }
+
+	// reply := rpc.PutReply{}
+
+	// ok := ck.clnt.Call(ck.server, "KVServer.Put", &args, &reply)
+	// if !ok {
+	// 	return rpc.ErrNoKey
+	// }
+
+	// return reply.Err
+
+	//=============================For Lab2C==========================
+	shouldRetry := false
+
 	args := rpc.PutArgs{
 		Key:     key,
 		Value:   value,
@@ -71,8 +117,30 @@ func (ck *Clerk) Put(key, value string, version rpc.Tversion) rpc.Err {
 	reply := rpc.PutReply{}
 
 	ok := ck.clnt.Call(ck.server, "KVServer.Put", &args, &reply)
+	// Retry PUT mechanism
 	if !ok {
-		return rpc.ErrNoKey
+		// If there is problem which happened with response, trigger
+		// retry mechanism
+		shouldRetry = true
+		for {
+			// Send another request to server
+			ok = ck.clnt.Call(ck.server, "KVServer.Put", &args, &reply)
+			time.Sleep(100 * time.Millisecond)
+
+			if ok {
+				break
+			}
+		}
+	}
+
+	if !shouldRetry {
+		// Everything is fine with first request/response
+		return reply.Err
+	}
+
+	// Else
+	if reply.Err == rpc.ErrVersion {
+		return rpc.ErrMaybe
 	}
 
 	return reply.Err
