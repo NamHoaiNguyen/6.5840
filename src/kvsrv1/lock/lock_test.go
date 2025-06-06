@@ -2,14 +2,16 @@ package lock
 
 import (
 	"fmt"
+	"log"
+
 	//	"log"
 	"strconv"
 	"testing"
 	"time"
 
-	"6.5840/kvsrv1"
+	kvsrv "6.5840/kvsrv1"
 	"6.5840/kvsrv1/rpc"
-	"6.5840/kvtest1"
+	kvtest "6.5840/kvtest1"
 )
 
 const (
@@ -22,13 +24,16 @@ func oneClient(t *testing.T, me int, ck kvtest.IKVClerk, done chan struct{}) kvt
 	lk := MakeLock(ck, "l")
 	ck.Put("l0", "", 0)
 	for i := 1; true; i++ {
+		fmt.Println("Namnh2 check oneClient out of loop!!!")
+
 		select {
 		case <-done:
+			fmt.Println("Ncaseamnh2 check oneClient is called with 1 client!!!")
 			return kvtest.ClntRes{i, 0}
 		default:
 			lk.Acquire()
 
-			// log.Printf("%d: acquired lock", me)
+			log.Printf("%d: acquired lock", me)
 
 			b := strconv.Itoa(me)
 			val, ver, err := ck.Get("l0")
@@ -52,11 +57,12 @@ func oneClient(t *testing.T, me int, ck kvtest.IKVClerk, done chan struct{}) kvt
 				t.Fatalf("%d: put failed %v", me, err)
 			}
 
-			// log.Printf("%d: release lock", me)
+			log.Printf("%d: release lock", me)
 
 			lk.Release()
 		}
 	}
+
 	return kvtest.ClntRes{}
 }
 
