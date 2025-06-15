@@ -35,10 +35,6 @@ type Raft struct {
 
 	votedFor int // CandidateId that received vote in current term(or null if none)
 
-	// electInterval int64 // Random election timeout of node(each node has it owns elect interval)
-
-	// heartbeatInterval int64 // Heartbeat timeout of each node
-
 	lastHeartbeatTimeRecv int64 // Time of latest heartbeat that node receives from leader(
 	// reupdated each time node receive heartbeat message) (unit: millisecond)
 
@@ -48,10 +44,9 @@ type Raft struct {
 
 	commitIndex int64 // index of highest log entry known to be commited(initialized to 0, increase monotonically)
 
-	//==========New design for timer=================
-	heartbeatInterval int64 // Heartbeat timeout of each node
+	heartbeatInterval int64 // Heartbeat timeout interval of each node
 
-	heartBeatTimer *time.Ticker
+	heartBeatTimer *time.Ticker // Used to send heartbeat each heartbeatInterval
 
 	electInterval int64 // Random election timeout of node(each node has it owns elect interval)
 
@@ -65,9 +60,6 @@ type Raft struct {
 	// Channel to notify that a new election round should be started if no leader
 	// is elected in previous term
 	electionTimeout chan bool
-
-	// Election first time
-	firstElect bool
 
 	mutex sync.Mutex
 }
@@ -261,13 +253,6 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	return ok
 }
 
-// func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
-// 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
-// 	return ok
-// }
-
-// func (rf *Raft) sendRequestAppendEntries(server int, args *)
-
 // the service using Raft (e.g. a k/v server) wants to start
 // agreement on the next command to be appended to Raft's log. if this
 // server isn't the leader, returns false. otherwise start the
@@ -316,13 +301,11 @@ func (rf *Raft) StartElect() {
 
 		if time.Now().UnixMilli()-rf.lastHeartbeatTimeRecv < rf.electInterval ||
 			rf.state == Leader {
-			rf.mutex.Unlock()
+			rf.mutex.Unlock() // Unlock required at line 315
 
 			time.Sleep(time.Duration(rf.electInterval) * time.Millisecond)
 			continue
 		}
-
-		// fmt.Printf("Node: %d wants to start electting!!!\n", rf.me)
 
 		// To begin an election, follower must transit candidate
 		rf.state = Candidate
@@ -339,91 +322,31 @@ func (rf *Raft) StartElect() {
 			// lastLogTerm:  (rf.log[len(rf.log)-1].Term), // term of candidate's last log entry
 		}
 
-		// rf.mutex.Unlock()
-
-		// rf.CollectVote(voteReq)
-
-		// TODO(namnh): recheck. Should request just after interval time
-		// NOTE: We MUST pause. Otherwise, multi collect vote will be sent at the same term
-		// <-rf.electionTimer.C
 		sleepInterval := rf.electInterval
-		rf.mutex.Unlock()
+
+		rf.mutex.Unlock() // Unlock required at line 315
 
 		go rf.CollectVote(voteReq)
 
+		// NOTE: We MUST pause. Otherwise, multi collect vote will be sent at the same term
 		time.Sleep(time.Duration(sleepInterval) * time.Millisecond)
 	}
-	// voteCount := 1
-
-	// for i := 0; i < len(rf.peers); i++ {
-	// 	if i == rf.me {
-	// 		// Of course, node shouldn't send request vote for itself
-	// 		continue
-	// 	}
-
-	// 	voteReply := &RequestVoteReply{}
-
-	// 	go rf.HandleVoteResponse(i, voteReq, voteReply, &voteCount)
-	// }
 }
 
-// func (rf *Raft) HandleVoteResponse(server int, voteReq *RequestVoteArgs, voteReply *RequestVoteReply, voteCount *int) {
-// 	ok := rf.sendRequestVote(server, voteReq, voteReply)
-// 	if !ok {
-// 		return
-// 	}
-
-// 	rf.mu.Lock()
-// 	if voteReply.Term > rf.currentTerm {
-// 		rf.currentTerm = voteReply.Term
-// 		rf.state = Follower
-// 		rf.votedFor = -1
-
-// 		rf.mu.Unlock()
-
-// 		return
-// 	}
-
-// 	if voteReply.VoteGranted {
-// 		*voteCount++
-// 		if *voteCount > len(rf.peers)/2 {
-// 			// If candidate win majority, it becomes leader
-// 			rf.state = Leader
-// 			rf.mu.Unlock()
-
-// 			// Send heartbeat to other nodes to confirm its leadership
-// 			go rf.SendHeartbeats()
-
-// 			return // Should stop election
-// 		}
-// 	}
-
-// 	rf.mu.Unlock()
-
-// }
-
-// ONLY 1 GOROUTINE CALL THIS FUNCTION(so only locks at critical sections instead of from the begining to end of function)
+// ONLY 1 GOROUTINE CALL THIS FUNCTION
 func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
-	// rf.mu.Lock()
-	// defer rf.mutex.Unlock()
 	// We want to use buffered channel instead of unbuffered
 	// Channel size of peers -1, because a candidate doesn't request itself
-	rf.mu.Lock()
-	peerServers := len(rf.peers)
-	// rf.mu.Unlock()
-
-	voteResult := make(chan *RequestVoteReply, peerServers)
+	voteResult := make(chan *RequestVoteReply, len(rf.peers)-1)
 
 	// Vote reply
 	voteReply := &RequestVoteReply{}
 
 	voteCounts := 1
 
-	rf.mu.Unlock()
-
 	for i := 0; i < len(rf.peers); i++ {
 		if i == rf.me {
-			// Of course, node shouldn't send request vote for itself
+			// Node shouldn't send request vote to itself
 			continue
 		}
 
@@ -431,7 +354,7 @@ func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
 	}
 
 	for !rf.killed() {
-		// TODO(namnh) : need to handle 3 cases
+		// Need to handle 3 cases
 		// 1 : Candidate receive majority vote -> become leader
 		// 2 : Candidate doesn't receive majority
 		//     vote in election timeout -> elect at next term
@@ -441,21 +364,20 @@ func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
 		select {
 		case voteReply := <-voteResult:
 			rf.mu.Lock()
-			fmt.Printf("Namnh check voteReply.term: %d and voteGranted: %t and candidate's currentTem: %d\n", voteReply.Term, voteReply.VoteGranted, rf.currentTerm)
 
 			if voteReply.Term > rf.currentTerm {
-				fmt.Printf("Node %d candidate become follower because of invalid term!!!\n", rf.me)
-
+				// If someone else replies a term > candidate's current term,
+				// candidate steps back to follower and update it current term
+				// with reply's term
 				rf.currentTerm = voteReply.Term
 				rf.state = Follower
 				rf.votedFor = -1
 				rf.ResetElectionTimeout()
-				// rf.ResetHeartbeatTimeout()
-				rf.mu.Unlock()
+				rf.mu.Unlock() // Unlock acquired at line 380
 
 				return
 			}
-			rf.mu.Unlock()
+			rf.mu.Unlock() // Unlock acquired at line 380
 
 			// node reply's term < candidate's term
 			if voteReply.VoteGranted {
@@ -463,58 +385,39 @@ func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
 
 				voteCounts++
 				if voteCounts > len(rf.peers)/2 {
-					// If candidate win majority
-					// rf.mu.Lock()
-					// Candidate become leader
+					// If acandidate win majority,  becomes leader
 					rf.state = Leader
-					fmt.Printf("Node: %d becomes leader at term: %d!!!\n", rf.me, rf.currentTerm)
 					rf.ResetElectionTimeout()
-					// rf.ResetHeartbeatTimeout()
-
-					rf.mu.Unlock()
+					rf.mu.Unlock() // Unlock acquired at line 398
 
 					// Send heartbeat to other nodes to confirm its leadership
 					go rf.SendHeartbeats()
 
-					return // Should stop election
+					return
 				}
 
-				rf.mu.Unlock()
+				rf.mu.Unlock() // Unlock acquired at line 398
 
 			}
-		case shouldStopVote := <-rf.appendEntryResponses:
+		case <-rf.appendEntryResponses:
 			// Candidate receive append entries node from leader
-			fmt.Printf("Node : %d Receive message from another node and it wants to be leader", rf.me)
-
-			if shouldStopVote {
-				rf.mu.Lock()
-				rf.state = Follower
-				rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
-				rf.votedFor = -1
-				rf.ResetElectionTimeout()
-				// rf.ResetHeartbeatTimeout()
-
-				rf.mu.Unlock()
-
-				return
-			}
-
-		case <-rf.electionTimer.C:
-			// case <-rf.electionTimeout:
-			// Election time of this term is out of.
-			fmt.Println("Election interval is timeout. Vote again!!!")
 			rf.mu.Lock()
-			// if rf.state == Candidate {
-			// go rf.StartElect()
-			// }
+			// Transit from canditate -> follower
+			rf.state = Follower
+			// Reupdate latest time that a node receives a heartbeat message
+			rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
+			rf.votedFor = -1
+			rf.ResetElectionTimeout()
 
+			rf.mu.Unlock() // Unlock acquired at line 418
+
+			return
+		case <-rf.electionTimer.C:
+			// Out of time election. Reelect with next term
+			rf.mu.Lock()
 			// Reset election timeout for next round
 			rf.ResetElectionTimeout()
-			// rf.ResetHeartbeatTimeout()
-
-			// rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
-
-			rf.mu.Unlock()
+			rf.mu.Unlock() // Unlock acquired at line 431
 
 			return
 		}
@@ -523,46 +426,30 @@ func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
 
 // Goroutine
 func (rf *Raft) SendHeartbeats() {
-	// rf.mu.Lock()
-	// if rf.state != Leader {
-	// 	// Only leader sends heartbeat
-	// 	rf.mu.Unlock()
-	// 	return
-	// }
-	// rf.mu.Unlock()
-
 	for !rf.killed() {
-		// fmt.Println("BEFORE TAKING LOCK TO SEND HEARTBEAT")
-
-		// rf.mu.Lock()
-		_, state := rf.GetState()
 		rf.mu.Lock()
 		if rf.state != Leader {
-			// fmt.Println("Only leader can send log heartbeat!!!")
 			// Only leader sends heartbeat
-			heartbeatInterval := rf.heartbeatInterval
-			rf.mu.Unlock()
-			// <-rf.heartBeatTimer.C
-			time.Sleep(time.Duration(heartbeatInterval) * time.Millisecond)
+			rf.mu.Unlock() // Unlock acquired at line 444
+
+			// Sleep for heartbeatInterval(ms)
+			time.Sleep(time.Duration(rf.heartbeatInterval) * time.Millisecond)
 
 			return
 		}
-
-		fmt.Printf("Leader : %d send heartbeat at: %d term and state is leader: %t!!!\n", rf.me, rf.currentTerm, state)
 
 		// Prepare params to send
 		heartBeatReq := &RequestAppendEntriesArgs{
 			Term:     rf.currentTerm,
 			LeaderId: rf.me,
-			// TODO(namnh) : What params should we do for these 3 ?
-			// Do we need them for Lab3A?
+			// TODO(namnh) : Add commented params to support remaining parts of Lab3
 			// PrevLogIndex: ,
 			// PrevLogTerm: ,
 			// Empty for heartbeat message
 			Entries: nil,
 			// LeaderCommit: ,
 		}
-		rf.mu.Unlock()
+		rf.mu.Unlock() // Unlock acquired at line 418
 
 		heartbeatRes := &RequestAppendEntriesReply{}
 
@@ -575,9 +462,8 @@ func (rf *Raft) SendHeartbeats() {
 			go rf.LeaderHandleAppendEntriesResponse(i, heartBeatReq, heartbeatRes)
 		}
 
-		// <-rf.heartBeatTimer.C
+		// Sleep for heartbeatInterval(ms)
 		time.Sleep(time.Duration(rf.heartbeatInterval) * time.Millisecond)
-
 	}
 }
 
@@ -603,7 +489,7 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(
 	}
 
 	if reply.Term > rf.currentTerm {
-		fmt.Printf("Leader: %d should step down!!!", rf.me)
+		fmt.Printf("Leader: %d should step down!!!\n", rf.me)
 		// Leader MUST step down if follower's term > leader's term
 		rf.state = Follower
 		// Reupdate leader's term
@@ -612,13 +498,10 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(
 
 		return
 	}
-
-	// TODO(namnh) : Maybe it is enought for lab3A ?
 }
 
 // RECEIVER
 // If node receives append entries(including hearbeat) message
-// TODO(namnh) : Note this function should be called anytime
 func (rf *Raft) HandleRequestAppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppendEntriesReply) {
 	// If is heartbeat message
 	rf.mu.Lock()
@@ -626,21 +509,12 @@ func (rf *Raft) HandleRequestAppendEntries(args *RequestAppendEntriesArgs, reply
 	if args.Entries == nil {
 		// Heartbeat message
 		if args.Term < rf.currentTerm {
-			// reply.Term = rf.currentTerm
-			// fmt.Printf("node state: %d is fales to add entry into node: %d!!!\n", args.LeaderId, rf.me)
-			// fmt.Printf("Value of args.Term: %d and rf.currentTerm: %d\n", args.Term, rf.currentTerm)
-
 			reply.Term = rf.currentTerm
 			reply.Success = false
-			rf.mu.Unlock()
+			rf.mu.Unlock() // Unlock acquired at line 522
 			return
 		}
 
-		// Now append entries request's term >= node's term
-		// First, update node's current term
-		// rf.mu.Lock()
-
-		// fmt.Printf("node id: %d should becomes followers at this step!!!\n", rf.me)
 		// TODO(namnh) : Order of these 2 lines are important or not ?
 		reply.Term = rf.currentTerm
 		rf.currentTerm = args.Term
@@ -661,32 +535,20 @@ func (rf *Raft) HandleRequestAppendEntries(args *RequestAppendEntriesArgs, reply
 		rf.votedFor = -1
 		// Reupdate last time receive heartbeat message
 		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
-		rf.ResetElectionTimeout()
-		rf.mu.Unlock()
+		rf.mu.Unlock() // Unlock acquired at line 522
 
 		// Send message to collectVote flow that node accepts another node as its leader
 		// rf.appendEntryResponses <- reply.Success
 		if isCandidate {
 			go func() { rf.appendEntryResponses <- isCandidate }()
 		}
-		// rf.appendEntryResponses <- reply.Success
+
 		return
-
-		// TODO(namnh )Check log consistency(not for lab3A) ?
-		// if
-
-		// // TODO(namnh : 3A) : Should it happen when election happens flow ?
-		// if rf.state == Candidate {
-		// 	// If node's role = candidate, immediately become follower
-		// 	rf.state = Follower
-		// 	return
-		// }
 	}
 }
 
-// ONLY belongs to heartbeat timeout
+// NEED to acquire lock before calling
 func (rf *Raft) ResetHeartbeatTimeout() {
-	//TODO(namnh) : Do we need lock?
 	newHeartbeatTimeout := (100 + (rand.Int63() % 150))
 	rf.heartbeatInterval = newHeartbeatTimeout
 	if rf.heartBeatTimer != nil {
@@ -695,62 +557,16 @@ func (rf *Raft) ResetHeartbeatTimeout() {
 	rf.heartBeatTimer = time.NewTicker((time.Duration)(newHeartbeatTimeout) * time.Millisecond)
 }
 
-// ONLY belongs to vote election goroutine
+// NEED to acquire lock before calling
 func (rf *Raft) ResetElectionTimeout() {
-	//TODO(namnh) : Do we need lock?
-
 	newElectionTimeout := (400 + (rand.Int63n(201)))
 	rf.electInterval = newElectionTimeout
-	fmt.Printf("Node : %d generate new Value of new newElectionTimeout for next election: %d!!!\n", rf.me, newElectionTimeout)
 	if rf.electionTimer != nil {
 		rf.electionTimer.Stop()
 	}
 	rf.electionTimer = time.NewTicker(
 		(time.Duration)(newElectionTimeout) * time.Millisecond)
 }
-
-// There are 2 events that execute after each interval.
-// 1 Send Heartbeat to leader IF node = FOLLOWER(each HeartbeatInterval)
-// 2 Elect new leader in case there is no leader voted at previous term(random voteInterval)
-func (rf *Raft) tickerV3() {
-	for !rf.killed() {
-		// Start vote election each interval
-		<-rf.electionTimer.C
-		rf.mu.Lock()
-		// Check that we should start election or not
-		if time.Now().UnixMilli()-rf.lastHeartbeatTimeRecv >= rf.electInterval &&
-			rf.state != Leader {
-			fmt.Printf("Server %d start election in tickerV3! with server's state: %d!!!\n", rf.me, rf.state)
-			// TODO(namnh) : how should we stop previous CollectVote ?
-			if rf.firstElect {
-				rf.firstElect = false
-			} else {
-				rf.electionTimeout <- true
-				fmt.Println("Stop previous election to start a new one!!!")
-			}
-			go rf.StartElect()
-			rf.ResetElectionTimeout()
-		}
-
-		rf.mu.Unlock()
-	}
-}
-
-// func (rf *Raft) ticker() {
-// 	for rf.killed() == false {
-
-// 		// Your code here (3A)
-// 		// Check if a leader election should be started.
-
-// 		// If should start leader election
-// 		// now - lastHeartbeatTaken >= HeartbeatInterval
-
-// 		// pause for a random amount of time between 50 and 350
-// 		// milliseconds.
-// 		ms := 50 + (rand.Int63() % 300)
-// 		time.Sleep(time.Duration(ms) * time.Millisecond)
-// 	}
-// }
 
 // the service or tester wants to create a Raft server. the ports
 // of all the Raft servers (including this one) are in peers[]. this
@@ -775,37 +591,23 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// Init candidate id that received vote in current term
 	rf.votedFor = -1
-
-	// heartbeat interval of node
-	// rf.heartbeatInterval = rf.ResetHeartbeatTimeout()
-	// get election timeout at initializaiton
-	// rf.lastElectTimeout = rf.ResetVoteTimeout()
 	rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
 	// Starting state of node is always = Follower
 	rf.state = Follower
-	// New timer
-	// rf.electInterval = 0
-	// rf.electionTimer = time.NewTicker(0)
 	rf.ResetElectionTimeout()
 	rf.ResetHeartbeatTimeout()
-	// rf.heartBeatTimer = time.NewTimer(0)
 
 	// AppendEntries response channel
 	rf.appendEntryResponses = make(chan bool)
-
 	rf.electionTimeout = make(chan bool)
-	rf.firstElect = true
 
 	rf.mu.Unlock()
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
-	// start ticker goroutine to start elections
-	// go rf.ticker()
-	// go rf.tickerV3()
+	// start elect goroutine to start elections
 	go rf.StartElect()
-	// TODO(namnh) : Should we send heartbeat at here ?
 	go rf.SendHeartbeats()
 
 	return rf

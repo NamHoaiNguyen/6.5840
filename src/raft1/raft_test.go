@@ -121,7 +121,6 @@ func TestManyElections3A(t *testing.T) {
 
 		// either the current leader should still be alive,
 		// or the remaining four should elect a new one.
-		fmt.Printf("Value of ii: %d!!!\n", ii)
 		ts.checkOneLeader()
 
 		ts.g.ConnectOne(i1)
