@@ -8,7 +8,7 @@ package raft
 
 import (
 	//	"bytes"
-	"fmt"
+
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -78,7 +78,6 @@ type LogEntry struct {
 }
 
 type RequestAppendEntriesArgs struct {
-	// TODO(namnh) : Just define attributed needed for each class(3A)
 	Term         int64      // Leader's term
 	LeaderId     int        // so follower can redirect clients
 	PrevLogIndex int64      // index of log entry immediately preceding new ones
@@ -180,6 +179,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	defer rf.mutex.Unlock()
 
 	// TODO(namnh) : Lab3A - Only care about term
+	// TODO(namnh) : Modify this method for Lab3B
 	if args.Term < rf.currentTerm ||
 		(rf.currentTerm == args.Term && rf.votedFor != -1) {
 		// If candidate's term < node' s currentTerm or voted for someone else
@@ -210,9 +210,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	// still trying to elect leader
 	reply.Term = rf.currentTerm
-	// TODO(namnh) : no need to check log in this lab3A
 	reply.VoteGranted = true
-	// TOOD(namnh) : Update election timeout when receving heartbeat(IMPORTANT)
 	rf.ResetElectionTimeout()
 }
 
@@ -373,11 +371,11 @@ func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
 				rf.state = Follower
 				rf.votedFor = -1
 				rf.ResetElectionTimeout()
-				rf.mu.Unlock() // Unlock acquired at line 380
+				rf.mu.Unlock() // Unlock acquired at line 364
 
 				return
 			}
-			rf.mu.Unlock() // Unlock acquired at line 380
+			rf.mu.Unlock() // Unlock acquired at line 364
 
 			// node reply's term < candidate's term
 			if voteReply.VoteGranted {
@@ -388,7 +386,7 @@ func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
 					// If acandidate win majority,  becomes leader
 					rf.state = Leader
 					rf.ResetElectionTimeout()
-					rf.mu.Unlock() // Unlock acquired at line 398
+					rf.mu.Unlock() // Unlock acquired at line 382
 
 					// Send heartbeat to other nodes to confirm its leadership
 					go rf.SendHeartbeats()
@@ -396,7 +394,7 @@ func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
 					return
 				}
 
-				rf.mu.Unlock() // Unlock acquired at line 398
+				rf.mu.Unlock() // Unlock acquired at line 382
 
 			}
 		case <-rf.appendEntryResponses:
@@ -409,7 +407,7 @@ func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
 			rf.votedFor = -1
 			rf.ResetElectionTimeout()
 
-			rf.mu.Unlock() // Unlock acquired at line 418
+			rf.mu.Unlock() // Unlock acquired at line 402
 
 			return
 		case <-rf.electionTimer.C:
@@ -417,7 +415,7 @@ func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
 			rf.mu.Lock()
 			// Reset election timeout for next round
 			rf.ResetElectionTimeout()
-			rf.mu.Unlock() // Unlock acquired at line 431
+			rf.mu.Unlock() // Unlock acquired at line 415
 
 			return
 		}
@@ -430,7 +428,7 @@ func (rf *Raft) SendHeartbeats() {
 		rf.mu.Lock()
 		if rf.state != Leader {
 			// Only leader sends heartbeat
-			rf.mu.Unlock() // Unlock acquired at line 444
+			rf.mu.Unlock() // Unlock acquired at line 428
 
 			// Sleep for heartbeatInterval(ms)
 			time.Sleep(time.Duration(rf.heartbeatInterval) * time.Millisecond)
@@ -449,7 +447,7 @@ func (rf *Raft) SendHeartbeats() {
 			Entries: nil,
 			// LeaderCommit: ,
 		}
-		rf.mu.Unlock() // Unlock acquired at line 418
+		rf.mu.Unlock() // Unlock acquired at line 428
 
 		heartbeatRes := &RequestAppendEntriesReply{}
 
@@ -489,7 +487,7 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(
 	}
 
 	if reply.Term > rf.currentTerm {
-		fmt.Printf("Leader: %d should step down!!!\n", rf.me)
+		// fmt.Printf("Leader: %d should step down!!!\n", rf.me)
 		// Leader MUST step down if follower's term > leader's term
 		rf.state = Follower
 		// Reupdate leader's term
@@ -511,11 +509,10 @@ func (rf *Raft) HandleRequestAppendEntries(args *RequestAppendEntriesArgs, reply
 		if args.Term < rf.currentTerm {
 			reply.Term = rf.currentTerm
 			reply.Success = false
-			rf.mu.Unlock() // Unlock acquired at line 522
+			rf.mu.Unlock() // Unlock acquired at line 505
 			return
 		}
 
-		// TODO(namnh) : Order of these 2 lines are important or not ?
 		reply.Term = rf.currentTerm
 		rf.currentTerm = args.Term
 
@@ -535,7 +532,7 @@ func (rf *Raft) HandleRequestAppendEntries(args *RequestAppendEntriesArgs, reply
 		rf.votedFor = -1
 		// Reupdate last time receive heartbeat message
 		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
-		rf.mu.Unlock() // Unlock acquired at line 522
+		rf.mu.Unlock() // Unlock acquired at line 505
 
 		// Send message to collectVote flow that node accepts another node as its leader
 		// rf.appendEntryResponses <- reply.Success
