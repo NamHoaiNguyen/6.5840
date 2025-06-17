@@ -42,8 +42,6 @@ type Raft struct {
 
 	log []LogEntry // log entries
 
-	commitIndex int64 // index of highest log entry known to be commited(initialized to 0, increase monotonically)
-
 	heartbeatInterval int64 // Heartbeat timeout interval of each node
 
 	heartBeatTimer *time.Ticker // Used to send heartbeat each heartbeatInterval
@@ -60,6 +58,30 @@ type Raft struct {
 	// Channel to notify that a new election round should be started if no leader
 	// is elected in previous term
 	electionTimeout chan bool
+
+	// index of highest log entry known to be
+	// committed (initialized to 0, increases
+	// monotonically)
+	commitIndex int64
+
+	// index of highest log entry applied to state
+	// machine (initialized to 0, increases
+	// monotonically)
+	lastApplied int64
+
+	// for each server, index of the next log entry
+	// to send to that server (initialized to leader
+	// last log index + 1)
+	// (Volatile state on leaders)
+	// (Reinitialized after election)
+	nextIndex []int64
+
+	// 	for each server, index of highest log entry
+	// known to be replicated on server
+	// (initialized to 0, increases monotonically)
+	// (Volatile state on leaders)
+	// (Reinitialized after election)
+	matchIndex []int64
 
 	mutex sync.Mutex
 }
@@ -172,46 +194,39 @@ type RequestVoteReply struct {
 	VoteGranted bool  // true means candidate recived vote
 }
 
-// example RequestVote RPC handler.
+// RequestVote RPC handler.
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (3A, 3B).
 	rf.mutex.Lock()
 	defer rf.mutex.Unlock()
 
-	// TODO(namnh) : Lab3A - Only care about term
-	// TODO(namnh) : Modify this method for Lab3B
-	if args.Term < rf.currentTerm ||
-		(rf.currentTerm == args.Term && rf.votedFor != -1) {
-		// If candidate's term < node' s currentTerm or voted for someone else
-		// return false(node won't vote for candidate) and
-		// return currentTerm of node to let candidate update its term
+	if args.Term < rf.currentTerm {
 		reply.VoteGranted = false
 		reply.Term = rf.currentTerm
 
 		return
 	}
 
-	// Now args.Term == rf.currentTerm
-	if args.Term == rf.currentTerm && rf.votedFor == args.CandidateId {
-		// If voted for the same candidate in this term
-		reply.VoteGranted = true
+	// TODO(namnh) : Modify this method for Lab3B
+	// If hadn't voted for anyone else in this term, or voted for candidate sent request this term
+	// or candidate'sterm > node's current term && candidate's log is up-to-date
+	if rf.votedFor == -1 || rf.votedFor == args.CandidateId || args.Term > rf.currentTerm { /*&&
+		(args.LastLogTerm > rf.log[len(rf.log)-1].Term || (args.LastLogTerm == rf.currentTerm && args.LastLogIndex > rf.commitIndex)) {*/
+		// Update currentTerm, votedFor and steps down to follower
+		rf.currentTerm = args.Term
+		rf.votedFor = args.CandidateId
+		rf.state = Follower
+
 		reply.Term = rf.currentTerm
+		reply.VoteGranted = true
 		rf.ResetElectionTimeout()
 
 		return
 	}
 
-	if args.Term > rf.currentTerm {
-		// Update currentTerm, votedFor and steps down to follower
-		rf.currentTerm = args.Term
-		rf.votedFor = -1
-		rf.state = Follower
-	}
-
-	// still trying to elect leader
+	// All other cases, no vote
+	reply.VoteGranted = false
 	reply.Term = rf.currentTerm
-	reply.VoteGranted = true
-	rf.ResetElectionTimeout()
 }
 
 // example code to send a RequestVote RPC to a server.
@@ -269,6 +284,15 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	isLeader := true
 
 	// Your code here (3B).
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	if rf.state != Leader {
+		return index, term, false
+	}
+
+	// term = int(rf.currentTerm)
+	// isLeader = (rf.state == Leader)
 
 	return index, term, isLeader
 }
@@ -465,6 +489,23 @@ func (rf *Raft) SendHeartbeats() {
 	}
 }
 
+// Goroutine
+// Should split this method with heartbeat
+// Because heartbeat should be sended periodically
+func (rf *Raft) SendAppendEntries() {
+	for !rf.killed() {
+		rf.mu.Lock()
+		if rf.state != Leader {
+			// Only leader can send append entries message
+			rf.mu.Unlock()
+			// TODO(namnh, 3B) : Should we sleep for an interval in this case ?
+			continue
+		}
+
+		rf.mu.Unlock()
+	}
+}
+
 // SENDER
 func (rf *Raft) LeaderHandleAppendEntriesResponse(
 	server int,
@@ -577,7 +618,6 @@ func (rf *Raft) ResetElectionTimeout() {
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *tester.Persister, applyCh chan raftapi.ApplyMsg) raftapi.Raft {
 	rf := &Raft{}
-	rf.mu.Lock()
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
@@ -597,8 +637,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// AppendEntries response channel
 	rf.appendEntryResponses = make(chan bool)
 	rf.electionTimeout = make(chan bool)
-
-	rf.mu.Unlock()
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
