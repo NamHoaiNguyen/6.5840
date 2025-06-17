@@ -84,6 +84,8 @@ type Raft struct {
 	matchIndex []int64
 
 	mutex sync.Mutex
+
+	cond *sync.Cond
 }
 
 type NodeState int
@@ -117,8 +119,8 @@ type RequestAppendEntriesReply struct {
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
 	// Your code here (3A).
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+	rf.cond.L.Lock()
+	defer rf.cond.L.Unlock()
 	return int(rf.currentTerm), rf.state == Leader
 }
 
@@ -162,8 +164,8 @@ func (rf *Raft) readPersist(data []byte) {
 
 // how many bytes in Raft's persisted log?
 func (rf *Raft) PersistBytes() int {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+	rf.cond.L.Lock()
+	defer rf.cond.L.Unlock()
 	return rf.persister.RaftStateSize()
 }
 
@@ -284,8 +286,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	isLeader := true
 
 	// Your code here (3B).
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+	rf.cond.L.Lock()
+	defer rf.cond.L.Unlock()
 
 	if rf.state != Leader {
 		return index, term, false
@@ -385,7 +387,7 @@ func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
 		// else -> candidate continues its vote process
 		select {
 		case voteReply := <-voteResult:
-			rf.mu.Lock()
+			rf.cond.L.Lock()
 
 			if voteReply.Term > rf.currentTerm {
 				// If someone else replies a term > candidate's current term,
@@ -395,35 +397,33 @@ func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
 				rf.state = Follower
 				rf.votedFor = -1
 				rf.ResetElectionTimeout()
-				rf.mu.Unlock() // Unlock acquired at line 364
+				rf.cond.L.Unlock() // Unlock acquired at line 364
 
 				return
 			}
-			rf.mu.Unlock() // Unlock acquired at line 364
+			rf.cond.L.Unlock() // Unlock acquired at line 364
 
 			// node reply's term < candidate's term
 			if voteReply.VoteGranted {
-				rf.mu.Lock()
+				rf.cond.L.Lock()
 
 				voteCounts++
 				if voteCounts > len(rf.peers)/2 {
 					// If acandidate win majority,  becomes leader
 					rf.state = Leader
 					rf.ResetElectionTimeout()
-					rf.mu.Unlock() // Unlock acquired at line 382
+					rf.cond.Signal()
 
-					// Send heartbeat to other nodes to confirm its leadership
-					go rf.SendHeartbeats()
-
+					// Notify to sendheartbeats goroutine
+					rf.cond.L.Unlock()
 					return
 				}
 
-				rf.mu.Unlock() // Unlock acquired at line 382
-
+				rf.cond.L.Unlock()
 			}
 		case <-rf.appendEntryResponses:
 			// Candidate receive append entries node from leader
-			rf.mu.Lock()
+			rf.cond.L.Lock()
 			// Transit from canditate -> follower
 			rf.state = Follower
 			// Reupdate latest time that a node receives a heartbeat message
@@ -431,15 +431,15 @@ func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
 			rf.votedFor = -1
 			rf.ResetElectionTimeout()
 
-			rf.mu.Unlock() // Unlock acquired at line 402
+			rf.cond.L.Unlock() // Unlock acquired at line 402
 
 			return
 		case <-rf.electionTimer.C:
 			// Out of time election. Reelect with next term
-			rf.mu.Lock()
+			rf.cond.L.Lock()
 			// Reset election timeout for next round
 			rf.ResetElectionTimeout()
-			rf.mu.Unlock() // Unlock acquired at line 415
+			rf.cond.L.Unlock() // Unlock acquired at line 415
 
 			return
 		}
@@ -449,15 +449,10 @@ func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
 // Goroutine
 func (rf *Raft) SendHeartbeats() {
 	for !rf.killed() {
-		rf.mu.Lock()
-		if rf.state != Leader {
+		rf.cond.L.Lock()
+		for rf.state != Leader {
 			// Only leader sends heartbeat
-			rf.mu.Unlock() // Unlock acquired at line 428
-
-			// Sleep for heartbeatInterval(ms)
-			time.Sleep(time.Duration(rf.heartbeatInterval) * time.Millisecond)
-
-			return
+			rf.cond.Wait() // Unlock acquired at line 452
 		}
 
 		// Prepare params to send
@@ -471,7 +466,7 @@ func (rf *Raft) SendHeartbeats() {
 			Entries: nil,
 			// LeaderCommit: ,
 		}
-		rf.mu.Unlock() // Unlock acquired at line 428
+		rf.cond.L.Unlock() // Unlock acquired at line 428
 
 		heartbeatRes := &RequestAppendEntriesReply{}
 
@@ -494,15 +489,15 @@ func (rf *Raft) SendHeartbeats() {
 // Because heartbeat should be sended periodically
 func (rf *Raft) SendAppendEntries() {
 	for !rf.killed() {
-		rf.mu.Lock()
+		rf.cond.L.Lock()
 		if rf.state != Leader {
 			// Only leader can send append entries message
-			rf.mu.Unlock()
+			rf.cond.L.Unlock()
 			// TODO(namnh, 3B) : Should we sleep for an interval in this case ?
 			continue
 		}
 
-		rf.mu.Unlock()
+		rf.cond.L.Unlock()
 	}
 }
 
@@ -518,8 +513,8 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(
 		return
 	}
 
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+	rf.cond.L.Lock()
+	defer rf.cond.L.Unlock()
 
 	if args.Term != rf.currentTerm || rf.state != Leader {
 		// If leader isn't leader anymore
@@ -543,14 +538,14 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(
 // If node receives append entries(including hearbeat) message
 func (rf *Raft) HandleRequestAppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppendEntriesReply) {
 	// If is heartbeat message
-	rf.mu.Lock()
+	rf.cond.L.Lock()
 
 	if args.Entries == nil {
 		// Heartbeat message
 		if args.Term < rf.currentTerm {
 			reply.Term = rf.currentTerm
 			reply.Success = false
-			rf.mu.Unlock() // Unlock acquired at line 505
+			rf.cond.L.Unlock() // Unlock acquired at line 505
 			return
 		}
 
@@ -573,7 +568,7 @@ func (rf *Raft) HandleRequestAppendEntries(args *RequestAppendEntriesArgs, reply
 		rf.votedFor = -1
 		// Reupdate last time receive heartbeat message
 		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
-		rf.mu.Unlock() // Unlock acquired at line 505
+		rf.cond.L.Unlock() // Unlock acquired at line 505
 
 		// Send message to collectVote flow that node accepts another node as its leader
 		// rf.appendEntryResponses <- reply.Success
@@ -637,6 +632,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// AppendEntries response channel
 	rf.appendEntryResponses = make(chan bool)
 	rf.electionTimeout = make(chan bool)
+
+	rf.cond = sync.NewCond(&rf.mu)
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
