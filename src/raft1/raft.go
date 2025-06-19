@@ -31,7 +31,7 @@ type Raft struct {
 	// Your data here (3A, 3B, 3C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
-	currentTerm int64 // Current node's term
+	currentTerm int // Current node's term
 
 	votedFor int // CandidateId that received vote in current term(or null if none)
 
@@ -62,26 +62,26 @@ type Raft struct {
 	// index of highest log entry known to be
 	// committed (initialized to 0, increases
 	// monotonically)
-	commitIndex int64
+	commitIndex int
 
 	// index of highest log entry applied to state
 	// machine (initialized to 0, increases
 	// monotonically)
-	lastApplied int64
+	lastApplied int
 
 	// for each server, index of the next log entry
 	// to send to that server (initialized to leader
 	// last log index + 1)
 	// (Volatile state on leaders)
 	// (Reinitialized after election)
-	nextIndex []int64
+	nextIndex []int
 
 	// 	for each server, index of highest log entry
 	// known to be replicated on server
 	// (initialized to 0, increases monotonically)
 	// (Volatile state on leaders)
 	// (Reinitialized after election)
-	matchIndex []int64
+	matchIndex []int
 
 	mutex sync.Mutex
 
@@ -97,22 +97,22 @@ const (
 )
 
 type LogEntry struct {
-	Term    int64 // term when entry was received by leader
-	Command any   // command for state machine
+	Term    int // term when entry was received by leader
+	Command any // command for state machine
 }
 
 type RequestAppendEntriesArgs struct {
-	Term         int64      // Leader's term
+	Term         int        // Leader's term
 	LeaderId     int        // so follower can redirect clients
-	PrevLogIndex int64      // index of log entry immediately preceding new ones
-	PrevLogTerm  int64      // term of prevLogIndex entry
+	PrevLogIndex int        // index of log entry immediately preceding new ones
+	PrevLogTerm  int        // term of prevLogIndex entry
 	Entries      []LogEntry // log entries to store(empty for heartbeat)
-	LeaderCommit int64      // leader commit index
+	LeaderCommit int        // leader commit index
 }
 
 type RequestAppendEntriesReply struct {
-	Term    int64 // currentTerm, for leader to update itself
-	Success bool  //  true of follower container entry matching prevLogIndex and prevLogTerm
+	Term    int  // currentTerm, for leader to update itself
+	Success bool //  true of follower container entry matching prevLogIndex and prevLogTerm
 }
 
 // return currentTerm and whether this server
@@ -182,18 +182,18 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 // field names must start with capital letters!
 type RequestVoteArgs struct {
 	// Your data here (3A, 3B).
-	Term         int64 // candidate's term
-	CandidateId  int   //candidate requesting vote id
-	LastLogIndex int64 // index of candidate's last log entry
-	LastLogTerm  int64 // term of candidate's last log entry
+	Term         int // candidate's term
+	CandidateId  int //candidate requesting vote id
+	LastLogIndex int // index of candidate's last log entry
+	LastLogTerm  int // term of candidate's last log entry
 }
 
 // example RequestVote RPC reply structure.
 // field names must start with capital letters!
 type RequestVoteReply struct {
 	// Your data here (3A).
-	Term        int64 //  currentTerm, for candidate to update itself
-	VoteGranted bool  // true means candidate recived vote
+	Term        int  //  currentTerm, for candidate to update itself
+	VoteGranted bool // true means candidate recived vote
 }
 
 // RequestVote RPC handler.
@@ -209,7 +209,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		return
 	}
 
-	// TODO(namnh) : Modify this method for Lab3B
+	// TODO(namnh, 3B) : Modify this method for Lab3B
 	// If hadn't voted for anyone else in this term, or voted for candidate sent request this term
 	// or candidate'sterm > node's current term && candidate's log is up-to-date
 	if rf.votedFor == -1 || rf.votedFor == args.CandidateId || args.Term > rf.currentTerm { /*&&
@@ -281,22 +281,25 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 // term. the third return value is true if this server believes it is
 // the leader.
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	index := -1
-	term := -1
-	isLeader := true
-
 	// Your code here (3B).
 	rf.cond.L.Lock()
 	defer rf.cond.L.Unlock()
 
 	if rf.state != Leader {
-		return index, term, false
+		return -1, -1, false
 	}
 
-	// term = int(rf.currentTerm)
-	// isLeader = (rf.state == Leader)
+	// Appending new log entry into leader's log
+	newLogEntry := LogEntry{
+		Term:    rf.currentTerm,
+		Command: command,
+	}
+	rf.log = append(rf.log, newLogEntry)
 
-	return index, term, isLeader
+	// Replicate leader's log to other nodes
+	go rf.SendAppendEntries()
+
+	return len(rf.log), int(rf.currentTerm), (rf.state == Leader)
 }
 
 // the tester doesn't halt goroutines created by Raft after each test,
@@ -321,11 +324,11 @@ func (rf *Raft) killed() bool {
 // Goroutine
 func (rf *Raft) StartElect() {
 	for !rf.killed() {
-		rf.mutex.Lock()
+		rf.cond.L.Lock()
 
 		if time.Now().UnixMilli()-rf.lastHeartbeatTimeRecv < rf.electInterval ||
 			rf.state == Leader {
-			rf.mutex.Unlock() // Unlock required at line 315
+			rf.cond.L.Unlock()
 
 			time.Sleep(time.Duration(rf.electInterval) * time.Millisecond)
 			continue
@@ -348,7 +351,7 @@ func (rf *Raft) StartElect() {
 
 		sleepInterval := rf.electInterval
 
-		rf.mutex.Unlock() // Unlock required at line 315
+		rf.cond.L.Unlock()
 
 		go rf.CollectVote(voteReq)
 
@@ -412,9 +415,10 @@ func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
 					// If acandidate win majority,  becomes leader
 					rf.state = Leader
 					rf.ResetElectionTimeout()
-					rf.cond.Signal()
-
+					// TODO(namnh, 3B) : Reinitialized nextIndex and matchIndex
 					// Notify to sendheartbeats goroutine
+					// rf.cond.Signal()
+					rf.cond.Broadcast()
 					rf.cond.L.Unlock()
 					return
 				}
@@ -439,7 +443,7 @@ func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
 			rf.cond.L.Lock()
 			// Reset election timeout for next round
 			rf.ResetElectionTimeout()
-			rf.cond.L.Unlock() // Unlock acquired at line 415
+			rf.cond.L.Unlock()
 
 			return
 		}
@@ -459,11 +463,13 @@ func (rf *Raft) SendHeartbeats() {
 		heartBeatReq := &RequestAppendEntriesArgs{
 			Term:     rf.currentTerm,
 			LeaderId: rf.me,
-			// TODO(namnh) : Add commented params to support remaining parts of Lab3
-			// PrevLogIndex: ,
-			// PrevLogTerm: ,
+			// TODO(namnh, 3B) : Add commented params
+			// In case heartbeat, it should be the newest log
+			PrevLogIndex: len(rf.log) - 1,
+			PrevLogTerm:  rf.log[len(rf.log)-1].Term,
 			// Empty for heartbeat message
 			Entries: nil,
+			// TODO(namnh, 3B) : Maybe we don't need this field until 3C ?
 			// LeaderCommit: ,
 		}
 		rf.cond.L.Unlock() // Unlock acquired at line 428
@@ -484,30 +490,56 @@ func (rf *Raft) SendHeartbeats() {
 	}
 }
 
+// TODO(namnh, 3B): Implement
+// 1 . Reinitialized nextIndex[] and matchIndex[] after relection
+
 // Goroutine
 // Should split this method with heartbeat
 // Because heartbeat should be sended periodically
 func (rf *Raft) SendAppendEntries() {
 	for !rf.killed() {
 		rf.cond.L.Lock()
-		if rf.state != Leader {
+		for rf.state != Leader {
 			// Only leader can send append entries message
-			rf.cond.L.Unlock()
-			// TODO(namnh, 3B) : Should we sleep for an interval in this case ?
-			continue
+			rf.cond.Wait()
+			// TODO(namnh, 3B) : Recheck using condition variable at here?
 		}
 
+		// TODO(namnh, 3B) : send more than one for efficiency
+		var entriesList []LogEntry
+		entriesList = append(entriesList, rf.log[len(rf.log)-1])
+
+		appendEntryReq := &RequestAppendEntriesArgs{
+			Term:         rf.currentTerm,
+			LeaderId:     rf.me,
+			PrevLogIndex: len(rf.log) - 1,
+			PrevLogTerm:  rf.log[len(rf.log)-1].Term,
+			Entries:      entriesList,
+			// TODO(namnh, 3B) : Maybe we dont need until 3C ?
+			// LeaderCommit: ,
+		}
+
+		appendEntryRes := &RequestAppendEntriesReply{}
+
 		rf.cond.L.Unlock()
+
+		for i := 0; i < len(rf.peers); i++ {
+			if i == rf.me {
+				continue
+			}
+
+			go rf.LeaderHandleAppendEntriesResponse(rf.me, appendEntryReq, appendEntryRes)
+		}
 	}
 }
 
-// SENDER
+// Leader handle append entries response
 func (rf *Raft) LeaderHandleAppendEntriesResponse(
 	server int,
 	args *RequestAppendEntriesArgs,
 	reply *RequestAppendEntriesReply) {
 
-	ok := rf.peers[server].Call("Raft.HandleRequestAppendEntries", args, reply)
+	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
 
 	if !ok {
 		return
@@ -536,29 +568,83 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(
 
 // RECEIVER
 // If node receives append entries(including hearbeat) message
-func (rf *Raft) HandleRequestAppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppendEntriesReply) {
+func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppendEntriesReply) {
 	// If is heartbeat message
 	rf.cond.L.Lock()
 
+	// if args.Entries == nil {
+	// 	// Heartbeat message
+	// 	if args.Term < rf.currentTerm {
+	// 		reply.Term = rf.currentTerm
+	// 		reply.Success = false
+	// 		rf.cond.L.Unlock() // Unlock acquired at line 505
+	// 		return
+	// 	}
+
+	// 	reply.Term = rf.currentTerm
+	// 	rf.currentTerm = args.Term
+
+	// 	reply.Success = true
+
+	// 	var isCandidate bool
+	// 	if rf.state == Candidate {
+	// 		// If nodes's current state is candidate, send message to stop electing process
+	// 		// NOTE: In case that an outdated leader rejoin cluster, no need to send anything.
+	// 		// Because in this case, when outdated leader tries to send  heartbeat/append entry
+	// 		// messages, other followers detects this leader's term < their terms then reply
+	// 		// their terms. Outdated leader, based on follower's response will step down to follower.
+	// 		isCandidate = true
+	// 	}
+
+	// 	rf.state = Follower
+	// 	rf.votedFor = -1
+	// 	// Reupdate last time receive heartbeat message
+	// 	rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
+	// 	rf.cond.L.Unlock() // Unlock acquired at line 505
+
+	// 	// Send message to collectVote flow that node accepts another node as its leader
+	// 	// rf.appendEntryResponses <- reply.Success
+	// 	if isCandidate {
+	// 		go func() { rf.appendEntryResponses <- isCandidate }()
+	// 	}
+
+	// 	return
+	// }
+
+	// ============================Start 3B=======================================
+	// Always return node's currentTerm
+	reply.Term = rf.currentTerm
+
+	if args.Term < rf.currentTerm {
+		// if request's term < node's current term. Return false
+		// (and node who sent request must be steps down to follower)
+		reply.Success = false
+		rf.cond.L.Unlock()
+		return
+	}
+
+	if len(rf.log) <= args.PrevLogIndex ||
+		rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+		// If log doesn't contain an entry at prevLogIndex
+		// whose term matches prevLogTerm, return success = false
+		reply.Success = false
+		rf.cond.L.Unlock()
+		return
+	}
+
+	// Now args's term >= node's currentTerm
+	rf.currentTerm = args.Term
+
+	// Except 2 above conditons, success = true
+	reply.Success = true
+
 	if args.Entries == nil {
 		// Heartbeat message
-		if args.Term < rf.currentTerm {
-			reply.Term = rf.currentTerm
-			reply.Success = false
-			rf.cond.L.Unlock() // Unlock acquired at line 505
-			return
-		}
-
-		reply.Term = rf.currentTerm
-		rf.currentTerm = args.Term
-
-		reply.Success = true
-
 		var isCandidate bool
 		if rf.state == Candidate {
 			// If nodes's current state is candidate, send message to stop electing process
 			// NOTE: In case that an outdated leader rejoin cluster, no need to send anything.
-			// Because in this case, when outdated leader tries to send  heartbeat/append entry
+			// Because in this case, when outdated leader tries to send heartbeat/append entry
 			// messages, other followers detects this leader's term < their terms then reply
 			// their terms. Outdated leader, based on follower's response will step down to follower.
 			isCandidate = true
@@ -568,7 +654,7 @@ func (rf *Raft) HandleRequestAppendEntries(args *RequestAppendEntriesArgs, reply
 		rf.votedFor = -1
 		// Reupdate last time receive heartbeat message
 		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
-		rf.cond.L.Unlock() // Unlock acquired at line 505
+		rf.cond.L.Unlock()
 
 		// Send message to collectVote flow that node accepts another node as its leader
 		// rf.appendEntryResponses <- reply.Success
@@ -578,6 +664,10 @@ func (rf *Raft) HandleRequestAppendEntries(args *RequestAppendEntriesArgs, reply
 
 		return
 	}
+
+	// AppendEntry message
+
+	rf.cond.L.Unlock()
 }
 
 // NEED to acquire lock before calling
@@ -632,6 +722,11 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// AppendEntries response channel
 	rf.appendEntryResponses = make(chan bool)
 	rf.electionTimeout = make(chan bool)
+
+	// TODO(namnh, 3B) : Init node'slog
+	rf.log = []LogEntry{
+		{Term: 0, Command: 0},
+	}
 
 	rf.cond = sync.NewCond(&rf.mu)
 
