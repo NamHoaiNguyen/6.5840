@@ -102,6 +102,8 @@ const (
 )
 
 type LogEntry struct {
+	// TODO(namnh, 3B) : Recheck the precision of index field ?
+	Index   int // index of log
 	Term    int // term when entry was received by leader
 	Command any // command for state machine
 }
@@ -296,6 +298,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	// Appending new log entry into leader's log
 	newLogEntry := LogEntry{
+		Index:   len(rf.log),
 		Term:    rf.currentTerm,
 		Command: command,
 	}
@@ -347,14 +350,16 @@ func (rf *Raft) StartElect() {
 		rf.currentTerm++
 
 		// Prepate request vote request
+		// TODO(namnh, 3B) : Modify request
 		voteReq := &RequestVoteArgs{
-			Term:        rf.currentTerm,
-			CandidateId: rf.me, // Node vote for itself to become leader
-			// lastLogIndex: (int64)(len(rf.log) - 1),     // index of candidate's last log entry
-			// lastLogTerm:  (rf.log[len(rf.log)-1].Term), // term of candidate's last log entry
+			Term:         rf.currentTerm,
+			CandidateId:  rf.me,                        // Node vote for itself to become leader
+			LastLogIndex: (len(rf.log) - 1),            // index of candidate's last log entry
+			LastLogTerm:  (rf.log[len(rf.log)-1].Term), // term of candidate's last log entry
 		}
 
 		sleepInterval := rf.electInterval
+		// rf.ResetElectionTimeout()
 
 		rf.cond.L.Unlock()
 
@@ -512,26 +517,26 @@ func (rf *Raft) SendAppendEntries(isRetry bool) {
 // Leader execute append entry requests and handle response
 func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, isRetry bool) {
 	rf.cond.L.Lock()
-	if (isRetry) {
+	if isRetry {
 		// If leader and node's log mitmatch, decrease nextIndex
 		rf.nextIndex[server]--
 	}
 	prevLogIndex := rf.nextIndex[server] - 1
-	if (prevLogIndex < 0) {
+	if prevLogIndex < 0 {
 		panic("There is no way that a follower can deny a log with index = 0!!!")
 	}
 
 	logIndex := prevLogIndex + 1
 	var entriesList []LogEntry
-	if (!isHeartbeat) {
+	if !isHeartbeat {
 		// Only append entry message has entries log
-		for logIndex < len(rf.log) - 1 {
+		for logIndex < len(rf.log)-1 {
 			// Send all message from prevLogIndex + 1 to the end of log
 			entriesList = append(entriesList, rf.log[logIndex])
 			logIndex++
 		}
 	}
-	
+
 	appendEntryReq := &RequestAppendEntriesArgs{
 		Term:         rf.currentTerm,
 		LeaderId:     rf.me,
@@ -571,6 +576,7 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, 
 		return
 	}
 
+	// Now leader 's term >= node's term
 	if !appendEntryRes.Success {
 		// There is inconsistency between leader's log and follower'log
 		// Leader decrease its nextIndex corressponding with follower.
@@ -638,7 +644,7 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppe
 	}
 
 	if len(rf.log) <= args.PrevLogIndex ||
-		rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+		(len(rf.log) > args.PrevLogIndex && rf.log[args.PrevLogIndex].Term != args.PrevLogTerm) {
 		// If log doesn't contain an entry at prevLogIndex
 		// whose term matches prevLogTerm, return success = false
 		reply.Success = false
@@ -679,10 +685,39 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppe
 		return
 	}
 
-	// AppendEntry message
-
-
 	rf.cond.L.Unlock()
+
+	// Split handling append entry message to a seperate goroutine
+	go rf.HandleAppendEntryLog(args, reply)
+}
+
+// RECEIVER. Only respond to leader after apply entry to state machine
+func (rf *Raft) HandleAppendEntryLog(args *RequestAppendEntriesArgs,
+	reply *RequestAppendEntriesReply) {
+	rf.cond.L.Lock()
+	defer rf.cond.L.Unlock()
+
+	for _, log := range args.Entries {
+		// If an existing entry conflicts with a new one(same index but different terms)
+		// delete the existing entry and all that follow it
+		logEntryIndex := log.Index
+		logEntryTerm := log.Term
+
+		if logEntryIndex < len(rf.log) && logEntryTerm != rf.log[logEntryIndex].Term {
+			// delete the existing entry and all that follow it
+			rf.log = rf.log[:logEntryIndex]
+			// In case condition is hit, all following entry after logEntryIndex was deleted.
+			// Then new log entries form leader following logEntryIndex couldn't be found
+			// So, we can skip the loop and just append remaining entries to node's log
+			break
+		}
+	}
+
+	rf.log = append(rf.log, args.Entries...)
+
+	if args.LeaderCommit > rf.commitIndex {
+		rf.commitIndex = min(args.LeaderCommit, len(rf.log)-1)
+	}
 }
 
 // NEED to acquire lock before calling
@@ -740,10 +775,10 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// TODO(namnh, 3B) : Start init data
 	rf.log = []LogEntry{
-		{Term: 0, Command: 0},
+		{Index: 0, Term: 0, Command: 0},
 	}
 	rf.virtualLog = []LogEntry{
-		{Term: 0, Command: 0},
+		{Index: 0, Term: 0, Command: 0},
 	}
 
 	// Volatile state on all servers
