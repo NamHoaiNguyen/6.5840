@@ -9,7 +9,6 @@ package raft
 import (
 	//	"bytes"
 
-	"fmt"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -52,14 +51,6 @@ type Raft struct {
 	// If no leader is voted in each election timeout -> start new round election
 	electionTimer *time.Ticker
 
-	// During elecction, if candidate's receive appendentry message from other node
-	// if this entry is valid, candidate stops election and becomes follower
-	appendEntryResponses chan bool
-
-	// Channel to notify that a new election round should be started if no leader
-	// is elected in previous term
-	electionTimeout chan bool
-
 	// index of highest log entry known to be
 	// committed (initialized to 0, increases
 	// monotonically)
@@ -84,15 +75,41 @@ type Raft struct {
 	// (Reinitialized after election)
 	matchIndex []int
 
+	// Specific for Lab
+	applyCh chan raftapi.ApplyMsg
+
 	// Start of data not used in raft algorithm, but for easier to implement
-	// Used for stepping back to find log leader until meeting a suitable one.
-	virtualLog []LogEntry
+	// Use to fast find a majority of matchIndex log to update commitIndex
+	// Key is index of log, value is number of nodes that commited that index
+	// During elecction, if candidate's receive appendentry message from other node
+	// if this entry is valid, candidate stops election and becomes follower
+	appendEntryResponses chan bool
+
+	// Channel to notify that a new election round should be started if no leader
+	// is elected in previous term
+	electionTimeout chan bool
+
+	// Retry channel. Use to resend ONLY append entry message to follower nodes
+	retryCh chan int
+
+	// Done channekl. To stop goroutine
+	done chan struct{}
+
+	collectLog map[int]int
 
 	mutex sync.Mutex
 
 	cond *sync.Cond
 	// End of data not used in raft algorithm, but for easier to implement
 }
+
+// type ApplyMsg struct {
+// 	CommandValid bool
+// 	Command      any
+// 	CommandIndex int
+
+// 	//TODO(namnh) : Add fields for other labs
+// }
 
 type NodeState int
 
@@ -224,8 +241,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// If hadn't voted for anyone else in this term, or voted for candidate sent request this term
 	// or candidate'sterm > node's current term && candidate's log is up-to-date
 	if rf.votedFor == -1 || rf.votedFor == args.CandidateId || args.Term > rf.currentTerm &&
-		(args.LastLogTerm > rf.log[len(rf.log)-1].Term || (args.LastLogTerm == rf.log[len(rf.log)-1].Term && args.LastLogIndex >= len(rf.log) - 1)) {
-	// if rf.votedFor == -1 || rf.votedFor == args.CandidateId || args.Term > rf.currentTerm {
+		(args.LastLogTerm > rf.log[len(rf.log)-1].Term || (args.LastLogTerm == rf.log[len(rf.log)-1].Term && args.LastLogIndex >= len(rf.log)-1)) {
+		// if rf.votedFor == -1 || rf.votedFor == args.CandidateId || args.Term > rf.currentTerm {
 		// Update currentTerm, votedFor and steps down to follower
 		rf.currentTerm = args.Term
 		rf.votedFor = args.CandidateId
@@ -309,10 +326,14 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	}
 	rf.log = append(rf.log, newLogEntry)
 
-	fmt.Println("Namnh check rf.log: ", rf.log)
+	rf.matchIndex[rf.me] = len(rf.log) - 1
+	rf.nextIndex[rf.me] = rf.matchIndex[rf.me]
+
+	// fmt.Printf("Leader is :%d\n", rf.me)
+	// fmt.Println("Namnh check rf.log at leader node each PUT command: ", rf.log)
 
 	// Replicate leader's log to other nodes
-	go rf.SendAppendEntries(false /*isRetry*/)
+	go rf.SendAppendEntries()
 
 	return len(rf.log) - 1, int(rf.currentTerm), (rf.state == Leader)
 }
@@ -501,6 +522,34 @@ func (rf *Raft) SendHeartbeats() {
 	}
 }
 
+// Goroutine
+func (rf *Raft) UpdateStateMachineLog() {
+	for !rf.killed() {
+		rf.cond.L.Lock()
+
+		// fmt.Printf("Namnh UpdateStateMachineLog Node: %d is :%d state and commitIndex: %d and lastApplied: %d\n", rf.me, rf.state, rf.commitIndex, rf.lastApplied)
+
+		for rf.commitIndex > rf.lastApplied {
+			// fmt.Printf("Namnh UpdateStateMachineLog Node: %d is :%d state\n", rf.me, rf.state)
+
+			rf.lastApplied++
+			logEntry := rf.log[rf.lastApplied]
+			applyMsg := raftapi.ApplyMsg{
+				CommandValid: true,
+				Command:      logEntry.Command,
+				CommandIndex: rf.lastApplied,
+			}
+			rf.cond.L.Unlock()
+			rf.applyCh <- applyMsg
+			rf.cond.L.Lock()
+		}
+
+		rf.cond.L.Unlock()
+
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 // TODO(namnh, 3B): Implement
 // 1 . Reinitialized nextIndex[] and matchIndex[] after relection
 
@@ -511,7 +560,7 @@ func (rf *Raft) SendHeartbeats() {
 // 1 : In normal situation, leader sends log entry to server.
 // 2 : Log between leader and follower don't match, leader must resend
 // log until the point that both node agree with each other about this log.
-func (rf *Raft) SendAppendEntries(isRetry bool) {
+func (rf *Raft) SendAppendEntries() {
 	for !rf.killed() {
 		rf.cond.L.Lock()
 		for rf.state != Leader {
@@ -526,7 +575,23 @@ func (rf *Raft) SendAppendEntries(isRetry bool) {
 				continue
 			}
 
-			go rf.LeaderHandleAppendEntriesResponse(i, false /*isHeartbeat*/, isRetry)
+			go rf.LeaderHandleAppendEntriesResponse(i, false /*isHeartbeat*/, false /*isRetry*/)
+		}
+	}
+}
+
+// Goroutine
+func (rf *Raft) RetrySendAppendEntries() {
+	for !rf.killed() {
+		rf.cond.L.Lock()
+		for rf.state != Leader {
+			rf.cond.Wait()
+		}
+		rf.cond.L.Unlock()
+
+		select {
+		case server := <-rf.retryCh:
+			go rf.LeaderHandleAppendEntriesResponse(server, false /*isHeartbeat*/, false /*isRetry*/)
 		}
 	}
 }
@@ -534,6 +599,18 @@ func (rf *Raft) SendAppendEntries(isRetry bool) {
 // Leader execute append entry requests and handle response
 func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, isRetry bool) {
 	rf.cond.L.Lock()
+
+	if server == rf.me {
+		panic("Debug: Leader doesn't send append entry to itself!!!")
+	}
+
+	if rf.state != Leader {
+		// There is a case that before a leader sending append entry request to other node,
+		// something happens that cause this node isn't leader anymore
+		rf.cond.L.Unlock()
+		return
+	}
+
 	// fmt.Printf("Before Value of isRetry: %t and rf.nextIndex[server]: %d\n", isRetry, rf.nextIndex[server])
 
 	if isRetry {
@@ -543,24 +620,19 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, 
 	}
 
 	prevLogIndex := 0
-	if (rf.nextIndex[server] >= 1) {
+	if rf.nextIndex[server] >= 1 {
+		// To avoid out of index
 		prevLogIndex = rf.nextIndex[server] - 1
 	}
 
-	if prevLogIndex < 0 {
-		panic("There is no way that a follower can deny a log with index = 0!!!")
+	if prevLogIndex < 0 || prevLogIndex >= len(rf.log) {
+		panic("There is no way that a follower can deny a log with index = 0 or > len of log!!!")
 	}
 
-	logIndex := prevLogIndex + 1
 	var entriesList []LogEntry
 	if !isHeartbeat {
 		// Only append entry message has entries log
-		for logIndex < len(rf.log) {
-			// Send all message from prevLogIndex + 1 to the end of log
-			entriesList = append(entriesList, rf.log[logIndex])
-			// fmt.Println("Value of entrieesList: ", entriesList)
-			logIndex++
-		}
+		entriesList = append(entriesList, rf.log[(prevLogIndex+1):]...)
 	}
 
 	appendEntryReq := &RequestAppendEntriesArgs{
@@ -576,8 +648,16 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, 
 	appendEntryRes := &RequestAppendEntriesReply{}
 
 	ok := rf.peers[server].Call("Raft.AppendEntries", appendEntryReq, appendEntryRes)
-
 	if !ok {
+		// TODO(namnh, 3B) : This logic is wrong? How can i know which one should i reply sending ?
+		// Resend append entry request if false
+		// In this case, isRetry shouldbe = false
+		// because nextIndex shouldn't be updated
+		if !isHeartbeat {
+			// fmt.Printf("There is problem when sending append entry message to node: %d\n", server)
+			// go rf.SendAppendEntries(false /*isRetry*/)
+			rf.retryCh <- server
+		}
 		return
 	}
 
@@ -585,7 +665,6 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, 
 	defer rf.cond.L.Unlock()
 
 	if appendEntryRes.Term != rf.currentTerm || rf.state != Leader {
-	// if rf.state != Leader {
 		// If leader isn't leader anymore
 		// or leader's term isn't the same as before
 		return
@@ -607,9 +686,82 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, 
 		// There is inconsistency between leader's log and follower'log
 		// Leader decrease its nextIndex corressponding with follower.
 		rf.nextIndex[server]--
+		// TODO(namnh, 3B) : This logic is wrong. Only send to specific node.
 		// Resend log until log between server and follower match.
-		go rf.SendAppendEntries(true /*isRetry*/)
+		// go rf.SendAppendEntries(false /*isRetry*/)
+		go rf.LeaderHandleAppendEntriesResponse(server, false /*isHearbeat*/, true /*isRetry*/)
+
+		return
 	}
+
+	// Incase appendEntryRes.Success == true
+	// Update nextIndex(because we always send get to the end of leader's log
+	// to send. In other words, rf.nextIndex[server] == logIndex = len(leader's log) - 1)
+	if rf.nextIndex[server] > len(rf.log) {
+		panic("This is an implementation error!!!")
+	}
+
+	if len(entriesList) > 0 {
+		// fmt.Println("Namnh check LeaderHandleAppendEntriesResponse handle append entry message!!!")
+	}
+
+	rf.matchIndex[server] = prevLogIndex + len(entriesList)
+	rf.nextIndex[server] = rf.matchIndex[server] + 1
+
+	// // TODO(namnh, 3B) : Recheck this logic?
+	// // If a log entry is replicate to majority of nodes, update commitIndex
+	// for index, value := range rf.matchIndex {
+	// 	if value > len(rf.log)-1 {
+	// 		fmt.Printf("Node: %d has problem with matchIndex at: %d index.\n", index, value)
+	// 		panic("Error!!!!")
+	// 	}
+
+	// 	// if index == rf.me {
+	// 	// 	fmt.Printf("Current node: %d is leader: %t!!!\n", rf.me, rf.state == Leader)
+	// 	// 	continue
+	// 	// }
+
+	// 	if _, exists := rf.collectLog[rf.matchIndex[index]]; !exists {
+	// 		rf.collectLog[rf.matchIndex[index]] = 1
+	// 	} else {
+	// 		rf.collectLog[rf.matchIndex[index]]++
+	// 	}
+	// }
+
+	// // fmt.Println("Namnh check value of map", rf.collectLog)
+	// // fmt.Println("Namnh check log of leader", rf.log)
+
+	// // Check that if there is any value is replicate to majority of nodes
+	// for key, value := range rf.collectLog {
+	// 	if rf.log[key].Term == rf.currentTerm && value > len(rf.peers)/2 {
+	// 		// Update commitIndex
+	// 		rf.commitIndex = key
+	// 		break
+	// 	}
+	// }
+
+	// // Need to clear.
+	// clear(rf.collectLog)
+
+	N := len(rf.log) - 1
+	for N > rf.commitIndex {
+		count := 0
+		for i := 0; i < len(rf.peers); i++ {
+			if rf.matchIndex[i] >= N && rf.log[N].Term == rf.currentTerm {
+				count += 1
+			}
+		}
+
+		if count > len(rf.peers)/2 {
+			break
+		}
+
+		N -= 1
+	}
+
+	rf.commitIndex = N
+
+	// TODO(namnh, 3B) : Signal to update state machine to flush
 }
 
 // RECEIVER
@@ -618,46 +770,6 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppe
 	// If is heartbeat message
 	rf.cond.L.Lock()
 
-	// if args.Entries == nil {
-	// 	// Heartbeat message
-	// 	if args.Term < rf.currentTerm {
-	// 		reply.Term = rf.currentTerm
-	// 		reply.Success = false
-	// 		rf.cond.L.Unlock() // Unlock acquired at line 505
-	// 		return
-	// 	}
-
-	// 	reply.Term = rf.currentTerm
-	// 	rf.currentTerm = args.Term
-
-	// 	reply.Success = true
-
-	// 	var isCandidate bool
-	// 	if rf.state == Candidate {
-	// 		// If nodes's current state is candidate, send message to stop electing process
-	// 		// NOTE: In case that an outdated leader rejoin cluster, no need to send anything.
-	// 		// Because in this case, when outdated leader tries to send  heartbeat/append entry
-	// 		// messages, other followers detects this leader's term < their terms then reply
-	// 		// their terms. Outdated leader, based on follower's response will step down to follower.
-	// 		isCandidate = true
-	// 	}
-
-	// 	rf.state = Follower
-	// 	rf.votedFor = -1
-	// 	// Reupdate last time receive heartbeat message
-	// 	rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
-	// 	rf.cond.L.Unlock() // Unlock acquired at line 505
-
-	// 	// Send message to collectVote flow that node accepts another node as its leader
-	// 	// rf.appendEntryResponses <- reply.Success
-	// 	if isCandidate {
-	// 		go func() { rf.appendEntryResponses <- isCandidate }()
-	// 	}
-
-	// 	return
-	// }
-
-	// ============================Start 3B=======================================
 	// Always return node's currentTerm
 	reply.Term = rf.currentTerm
 
@@ -697,6 +809,11 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppe
 	// Except 2 above conditons, success = true
 	// reply.Success = true
 
+	if args.LeaderCommit > rf.commitIndex {
+		// fmt.Printf("Follower : %d receive leaderCommit: %d > its commitIndex: %d and index of log \n", rf.me, args.LeaderCommit, rf.commitIndex)
+		rf.commitIndex = min(args.LeaderCommit, len(rf.log)-1)
+	}
+
 	if args.Entries == nil {
 		// Heartbeat message
 		// fmt.Println("Is heartbeat message!!!")
@@ -727,6 +844,19 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppe
 		return
 	}
 
+	if len(args.Entries) > 0 {
+		// fmt.Println("This is append entry message from leader!!!Log valueof FOLLOWER after be added!!!", rf.log)
+		// fmt.Printf("namnh check log follower: %d after be appended!!!\n", rf.me)
+		// fmt.Println("namnh log after be appended!!!\n", rf.log)
+
+		// fmt.Printf("Follower : %d receive leaderCommit: %d and its commitIndex: %d\n", rf.me, args.LeaderCommit, rf.commitIndex)
+	}
+
+	// if args.LeaderCommit > rf.commitIndex {
+	// 	fmt.Printf("Follower : %d receive leaderCommit: %d > its commitIndex: %d and index of log \n", rf.me, args.LeaderCommit, rf.commitIndex)
+	// 	rf.commitIndex = min(args.LeaderCommit, len(rf.log)-1)
+	// }
+
 	rf.cond.L.Unlock()
 
 	// Split handling append entry message to a seperate goroutine
@@ -741,7 +871,6 @@ func (rf *Raft) HandleAppendEntryLog(args *RequestAppendEntriesArgs,
 	rf.cond.L.Lock()
 	defer rf.cond.L.Unlock()
 
-	// fmt.Println("HandleAppendEntryLog is called !!!")
 	numEntries := 0
 
 	// TODO(namnh, 3B) : Check this logic
@@ -767,17 +896,23 @@ func (rf *Raft) HandleAppendEntryLog(args *RequestAppendEntriesArgs,
 	}
 
 	// if (numEntries < len(args.Entries)) {
-		rf.log = append(rf.log, args.Entries[numEntries:]...)
+	rf.log = append(rf.log, args.Entries[numEntries:]...)
 	// }
 
 	// rf.log = append(rf.log, args.Entries...)
 
-	// fmt.Printf("New log of node: %d after be appended!!!\n", rf.me)
-	fmt.Println("Log value!!!", rf.log)
+	// if len(args.Entries) > 0 {
+	// 	// fmt.Println("This is append entry message from leader!!!Log valueof FOLLOWER after be added!!!", rf.log)
+	// 	fmt.Printf("namnh check log follower: %d after be appended!!!\n", rf.me)
+	// 	fmt.Println("namnh log after be appended!!!\n", rf.log)
 
-	if args.LeaderCommit > rf.commitIndex {
-		rf.commitIndex = min(args.LeaderCommit, len(rf.log)-1)
-	}
+	// 	fmt.Printf("Follower : %d receive leaderCommit: %d and its commitIndex: %d\n", rf.me, args.LeaderCommit, rf.commitIndex)
+	// }
+
+	// if args.LeaderCommit > rf.commitIndex {
+	// 	// fmt.Printf("Follower : %d receive leaderCommit: %d > its commitIndex: %d\n", rf.me, args.LeaderCommit, rf.commitIndex)
+	// 	rf.commitIndex = min(args.LeaderCommit, len(rf.log)-1)
+	// }
 
 	// TODO(namnh, 3B, IMPORTANT) : CHECK THIS CAREFULLY!!!
 	// Maybe the reason is above logic wrong
@@ -841,22 +976,31 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.log = []LogEntry{
 		{Index: 0, Term: 0, Command: 0},
 	}
-	rf.virtualLog = []LogEntry{
-		{Index: 0, Term: 0, Command: 0},
-	}
+	rf.collectLog = make(map[int]int)
 
 	// Volatile state on all servers
 	rf.commitIndex = 0
 	rf.lastApplied = 0
+
+	// Create retry channel
+	rf.retryCh = make(chan int)
+
+	// Assing applyMsg chan
+	rf.applyCh = applyCh
 
 	rf.cond = sync.NewCond(&rf.mu)
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
-	// start elect goroutine to start elections
+	// Start elect each time election interval is timeout
 	go rf.StartElect()
+	// Leader periodically send heartbeat to other nodes
 	go rf.SendHeartbeats()
+	// Background task which update log to state machine
+	go rf.UpdateStateMachineLog()
+	// Init retry sending message
+	go rf.RetrySendAppendEntries()
 
 	return rf
 }
