@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"fmt"
 	"time"
 
 	"6.5840/raftapi"
@@ -90,23 +91,23 @@ func (rf *Raft) SendHeartbeats() {
 // 2 : Log between leader and follower don't match, leader must resend
 // log until the point that both node agree with each other about this log.
 func (rf *Raft) SendAppendEntries() {
-	for !rf.killed() {
-		rf.cond.L.Lock()
-		for rf.state != Leader {
-			// Only leader can send append entries message
-			rf.cond.Wait()
-			// TODO(namnh, 3B) : Recheck using condition variable at here?
-		}
-		rf.cond.L.Unlock()
-
-		for i := 0; i < len(rf.peers); i++ {
-			if i == rf.me {
-				continue
-			}
-
-			go rf.LeaderHandleAppendEntriesResponse(i, false /*isHeartbeat*/, false /*isRetry*/)
-		}
+	// for !rf.killed() {
+	rf.cond.L.Lock()
+	for rf.state != Leader {
+		// Only leader can send append entries message
+		rf.cond.Wait()
+		// TODO(namnh, 3B) : Recheck using condition variable at here?
 	}
+	rf.cond.L.Unlock()
+
+	for i := 0; i < len(rf.peers); i++ {
+		if i == rf.me {
+			continue
+		}
+
+		go rf.LeaderHandleAppendEntriesResponse(i, false /*isHeartbeat*/, false /*isRetry*/)
+	}
+	// }
 }
 
 // Goroutine
@@ -295,6 +296,16 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppe
 	// If is heartbeat message
 	rf.cond.L.Lock()
 
+	if len(args.Entries) > 0 {
+		fmt.Printf("HandleAppendEntryLog WILL called in node: %d and log length: %d 6 TIMES\n", rf.me, len(args.Entries))
+		fmt.Printf("Value of prevLogIndex: %d and leaderCommit: %d\n", args.PrevLogIndex, args.LeaderCommit)
+
+		for _, val := range args.Entries {
+			fmt.Printf("Value of Term: %d and index: %d\n", val.Term, val.Index)
+			fmt.Println("Value of command", val.Command)
+		}
+	}
+
 	// Always return node's currentTerm
 	reply.Term = rf.currentTerm
 
@@ -383,6 +394,10 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppe
 	// }
 
 	rf.cond.L.Unlock()
+
+	// if len(args.Entries) > 0 {
+	// 	fmt.Printf("HandleAppendEntryLog WILL called in node: %d and log length: %d\n", rf.me, len(args.Entries))
+	// }
 
 	// Split handling append entry message to a seperate goroutine
 	// TODO(namnh, 3B, IMPORTANT) : CHECK THIS CAREFULLY!!!
