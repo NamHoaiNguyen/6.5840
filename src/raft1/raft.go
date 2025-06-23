@@ -9,6 +9,7 @@ package raft
 import (
 	//	"bytes"
 
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -119,6 +120,16 @@ func (rf *Raft) GetState() (int, bool) {
 	return int(rf.currentTerm), rf.state == Leader
 }
 
+// NEED to acquire lock before calling
+func (rf *Raft) ResetHeartbeatTimeout() {
+	newHeartbeatTimeout := (100 + (rand.Int63() % 150))
+	rf.heartbeatInterval = newHeartbeatTimeout
+	if rf.heartBeatTimer != nil {
+		rf.heartBeatTimer.Stop()
+	}
+	rf.heartBeatTimer = time.NewTicker((time.Duration)(newHeartbeatTimeout) * time.Millisecond)
+}
+
 // save Raft's persistent state to stable storage,
 // where it can later be retrieved after a crash and restart.
 // see paper's Figure 2 for a description of what should be persistent.
@@ -170,7 +181,6 @@ func (rf *Raft) PersistBytes() int {
 // that index. Raft should now trim its log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (3D).
-
 }
 
 // the service using Raft (e.g. a k/v server) wants to start
@@ -267,7 +277,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// TODO(namnh, 3B) : Start init data
 	rf.log = []LogEntry{
-		{Index: 0, Term: 0, Command: 0},
+		{Index: 0, Term: 0, Command: nil},
 	}
 	rf.collectLog = make(map[int]int)
 

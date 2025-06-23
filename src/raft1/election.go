@@ -1,6 +1,9 @@
 package raft
 
-import "time"
+import (
+	"math/rand"
+	"time"
+)
 
 // example RequestVote RPC arguments structure.
 // field names must start with capital letters!
@@ -18,6 +21,17 @@ type RequestVoteReply struct {
 	// Your data here (3A).
 	Term        int  //  currentTerm, for candidate to update itself
 	VoteGranted bool // true means candidate recived vote
+}
+
+// NEED to acquire lock before calling
+func (rf *Raft) ResetElectionTimeout() {
+	newElectionTimeout := (400 + (rand.Int63n(201)))
+	rf.electInterval = newElectionTimeout
+	if rf.electionTimer != nil {
+		rf.electionTimer.Stop()
+	}
+	rf.electionTimer = time.NewTicker(
+		(time.Duration)(newElectionTimeout) * time.Millisecond)
 }
 
 // RequestVote RPC handler.
@@ -234,29 +248,5 @@ func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
 
 			return
 		}
-	}
-}
-
-// Goroutine
-func (rf *Raft) SendHeartbeats() {
-	for !rf.killed() {
-		rf.cond.L.Lock()
-		for rf.state != Leader {
-			// Only leader sends heartbeat
-			rf.cond.Wait() // Unlock acquired at line 452
-		}
-		rf.cond.L.Unlock()
-
-		for i := 0; i < len(rf.peers); i++ {
-			if i == rf.me {
-				continue
-			}
-
-			// Leader doesn't be blocking to receive response from followers
-			go rf.LeaderHandleAppendEntriesResponse(i, true /*isHearbeat*/, false /*isRetry*/) // heartbeat message doesn't need to retry
-		}
-
-		// Sleep for heartbeatInterval(ms)
-		time.Sleep(time.Duration(rf.heartbeatInterval) * time.Millisecond)
 	}
 }

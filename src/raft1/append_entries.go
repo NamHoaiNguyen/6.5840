@@ -6,6 +6,27 @@ import (
 	"6.5840/raftapi"
 )
 
+type LogEntry struct {
+	// TODO(namnh, 3B) : Recheck the precision of index field ?
+	Index   int // index of log
+	Term    int // term when entry was received by leader
+	Command any // command for state machine
+}
+
+type RequestAppendEntriesArgs struct {
+	Term         int        // Leader's term
+	LeaderId     int        // so follower can redirect clients
+	PrevLogIndex int        // index of log entry immediately preceding new ones
+	PrevLogTerm  int        // term of prevLogIndex entry
+	Entries      []LogEntry // log entries to store(empty for heartbeat)
+	LeaderCommit int        // leader commit index
+}
+
+type RequestAppendEntriesReply struct {
+	Term    int  // currentTerm, for leader to update itself
+	Success bool //  true of follower container entry matching prevLogIndex and prevLogTerm
+}
+
 // Goroutine
 func (rf *Raft) UpdateStateMachineLog() {
 	for !rf.killed() {
@@ -31,6 +52,30 @@ func (rf *Raft) UpdateStateMachineLog() {
 		rf.cond.L.Unlock()
 
 		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// Goroutine
+func (rf *Raft) SendHeartbeats() {
+	for !rf.killed() {
+		rf.cond.L.Lock()
+		for rf.state != Leader {
+			// Only leader sends heartbeat
+			rf.cond.Wait() // Unlock acquired at line 452
+		}
+		rf.cond.L.Unlock()
+
+		for i := 0; i < len(rf.peers); i++ {
+			if i == rf.me {
+				continue
+			}
+
+			// Leader doesn't be blocking to receive response from followers
+			go rf.LeaderHandleAppendEntriesResponse(i, true /*isHearbeat*/, false /*isRetry*/) // heartbeat message doesn't need to retry
+		}
+
+		// Sleep for heartbeatInterval(ms)
+		time.Sleep(time.Duration(rf.heartbeatInterval) * time.Millisecond)
 	}
 }
 
@@ -183,10 +228,6 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, 
 	// to send. In other words, rf.nextIndex[server] == logIndex = len(leader's log) - 1)
 	if rf.nextIndex[server] > len(rf.log) {
 		panic("This is an implementation error!!!")
-	}
-
-	if len(entriesList) > 0 {
-		// fmt.Println("Namnh check LeaderHandleAppendEntriesResponse handle append entry message!!!")
 	}
 
 	rf.matchIndex[server] = prevLogIndex + len(entriesList)
