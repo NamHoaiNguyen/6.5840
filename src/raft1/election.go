@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"fmt"
 	"math/rand"
 	"time"
 )
@@ -47,30 +48,76 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		return
 	}
 
+	// Nodes still update it term
+	// rf.currentTerm = args.Term
+
 	// If votedFor is null or candidateId, and candidate’s log is at
 	// least as up-to-date as receiver’s log, grant vote
 
 	// TODO(namnh, 3B) : Modify this method for Lab3B
 	// If hadn't voted for anyone else in this term, or voted for candidate sent request this term
 	// or candidate'sterm > node's current term && candidate's log is up-to-date
-	if rf.votedFor == -1 || rf.votedFor == args.CandidateId || args.Term > rf.currentTerm &&
-		(args.LastLogTerm > rf.log[len(rf.log)-1].Term || (args.LastLogTerm == rf.log[len(rf.log)-1].Term && args.LastLogIndex >= len(rf.log)-1)) {
-		// if rf.votedFor == -1 || rf.votedFor == args.CandidateId || args.Term > rf.currentTerm {
-		// Update currentTerm, votedFor and steps down to follower
+	fmt.Printf("BEFORE CONDITION Node: %d become follower and voted for: %d with currentTerm: %d\n", rf.me, args.CandidateId, rf.currentTerm)
+	fmt.Printf("BEFORE CONDITION Value of args candidate. args.term: %d, Args.LastLogIndex: %d, args.LastLogTerm: %d\n", args.Term, args.LastLogIndex, args.LastLogTerm)
+	fmt.Printf("BEFORE CONDITION Value of voted node rf.log[len(rf.log)-1].Term: %d, and len of log len(rf.log)-1): %d\n", rf.log[len(rf.log)-1].Term, len(rf.log)-1)
+
+	// if rf.votedFor == -1 || rf.votedFor == args.CandidateId || args.Term > rf.currentTerm &&
+	// 	(args.LastLogTerm > rf.log[len(rf.log)-1].Term || (args.LastLogTerm == rf.log[len(rf.log)-1].Term && args.LastLogIndex >= len(rf.log)-1)) {
+	// 	// if rf.votedFor == -1 || rf.votedFor == args.CandidateId || args.Term > rf.currentTerm {
+	// 	// Update currentTerm, votedFor and steps down to follower
+	// 	fmt.Printf("Node: %d become follower and voted for: %d\n", rf.me, args.CandidateId)
+	// 	fmt.Printf("Value of args candidate. args.term: %d, Args.LastLogIndex: %d, args.LastLogTerm: %d\n", args.Term, args.LastLogIndex, args.LastLogTerm)
+	// 	fmt.Printf("Value of voted node rf.log[len(rf.log)-1].Term: %d, and len of log len(rf.log)-1): %d\n", rf.log[len(rf.log)-1].Term, len(rf.log)-1)
+
+	// 	rf.currentTerm = args.Term
+	// 	rf.votedFor = args.CandidateId
+	// 	rf.state = Follower
+
+	// 	reply.Term = rf.currentTerm
+	// 	reply.VoteGranted = true
+	// 	rf.ResetElectionTimeout()
+
+	// 	return
+	// }
+
+	if rf.votedFor == -1 || rf.votedFor == args.CandidateId || args.Term > rf.currentTerm {
 		rf.currentTerm = args.Term
 		rf.votedFor = args.CandidateId
-		rf.state = Follower
 
-		reply.Term = rf.currentTerm
-		reply.VoteGranted = true
-		rf.ResetElectionTimeout()
+		if args.LastLogTerm > rf.log[len(rf.log)-1].Term || (args.LastLogTerm == rf.log[len(rf.log)-1].Term && args.LastLogIndex >= len(rf.log)-1) {
+			rf.state = Follower
+
+			reply.Term = rf.currentTerm
+			reply.VoteGranted = true
+			rf.ResetElectionTimeout()
+		}
 
 		return
 	}
+	// 	(args.LastLogTerm > rf.log[len(rf.log)-1].Term || (args.LastLogTerm == rf.log[len(rf.log)-1].Term && args.LastLogIndex >= len(rf.log)-1)) {
+	// 	// if rf.votedFor == -1 || rf.votedFor == args.CandidateId || args.Term > rf.currentTerm {
+	// 	// Update currentTerm, votedFor and steps down to follower
+	// 	fmt.Printf("Node: %d become follower and voted for: %d\n", rf.me, args.CandidateId)
+	// 	fmt.Printf("Value of args candidate. args.term: %d, Args.LastLogIndex: %d, args.LastLogTerm: %d\n", args.Term, args.LastLogIndex, args.LastLogTerm)
+	// 	fmt.Printf("Value of voted node rf.log[len(rf.log)-1].Term: %d, and len of log len(rf.log)-1): %d\n", rf.log[len(rf.log)-1].Term, len(rf.log)-1)
+
+	// 	rf.currentTerm = args.Term
+	// 	rf.votedFor = args.CandidateId
+	// 	rf.state = Follower
+
+	// 	reply.Term = rf.currentTerm
+	// 	reply.VoteGranted = true
+	// 	rf.ResetElectionTimeout()
+
+	// 	return
+	// }
 
 	// All other cases, no vote
 	reply.VoteGranted = false
 	reply.Term = rf.currentTerm
+
+	// // Nodes still update it term
+	// rf.currentTerm = args.Term
 }
 
 // example code to send a RequestVote RPC to a server.
@@ -130,6 +177,8 @@ func (rf *Raft) StartElect() {
 		// Increment its current term
 		rf.currentTerm++
 
+		fmt.Printf("Node: %d become candidate: %d with current term: %d\n", rf.me, rf.state, rf.currentTerm)
+
 		// Prepate request vote request
 		// TODO(namnh, 3B) : Modify request
 		voteReq := &RequestVoteArgs{
@@ -187,6 +236,7 @@ func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
 				// If someone else replies a term > candidate's current term,
 				// candidate steps back to follower and update it current term
 				// with reply's term
+				fmt.Printf("node: %d at state: %d become follower when voting\n", rf.me, rf.state)
 				rf.currentTerm = voteReply.Term
 				rf.state = Follower
 				rf.votedFor = -1
@@ -205,6 +255,7 @@ func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
 				if voteCounts > len(rf.peers)/2 {
 					// If acandidate win majority,  becomes leader
 					rf.state = Leader
+					fmt.Printf("Don't tell me follower become leader: %d\n", rf.me)
 					rf.ResetElectionTimeout()
 					// TODO(namnh, 3B) : Reinitialized nextIndex and matchIndex
 					// Should we split it into another goroutine ?
@@ -227,16 +278,17 @@ func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
 				rf.cond.L.Unlock()
 			}
 		case <-rf.appendEntryResponses:
-			// Candidate receive append entries node from leader
+			// // Candidate receive append entries node from leader
 			rf.cond.L.Lock()
-			// Transit from canditate -> follower
-			rf.state = Follower
-			// Reupdate latest time that a node receives a heartbeat message
-			rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
-			rf.votedFor = -1
-			rf.ResetElectionTimeout()
+			fmt.Printf("Node: %d steps to follower\n", rf.me)
+			// // Transit from canditate -> follower
+			// rf.state = Follower
+			// // Reupdate latest time that a node receives a heartbeat message
+			// rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
+			// rf.votedFor = -1
+			// rf.ResetElectionTimeout()
 
-			rf.cond.L.Unlock() // Unlock acquired at line 402
+			rf.cond.L.Unlock()
 
 			return
 		case <-rf.electionTimer.C:

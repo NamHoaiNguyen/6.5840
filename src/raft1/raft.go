@@ -9,6 +9,7 @@ package raft
 import (
 	//	"bytes"
 
+	"fmt"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -213,10 +214,10 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.log = append(rf.log, newLogEntry)
 
 	rf.matchIndex[rf.me] = len(rf.log) - 1
-	rf.nextIndex[rf.me] = rf.matchIndex[rf.me]
+	rf.nextIndex[rf.me] = rf.matchIndex[rf.me] + 1
 
-	// fmt.Printf("Leader is :%d\n", rf.me)
-	// fmt.Println("Namnh check rf.log at leader node each PUT command: ", rf.log)
+	fmt.Printf("Leader is :%d\n", rf.me)
+	fmt.Println("Namnh check rf.log at leader node each PUT command: ", rf.log)
 
 	// Replicate leader's log to other nodes
 	go rf.SendAppendEntries()

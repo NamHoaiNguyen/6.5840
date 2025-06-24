@@ -285,7 +285,11 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, 
 		N -= 1
 	}
 
+	fmt.Printf("Value of rf.commitIndex BEFORE updated: %d at leader: %d\n", rf.commitIndex, rf.me)
+
 	rf.commitIndex = N
+
+	fmt.Printf("Value of rf.commitIndex AFTER updated: %d at leader: %d\n", rf.commitIndex, rf.me)
 
 	// TODO(namnh, 3B) : Signal to update state machine to flush
 }
@@ -297,7 +301,7 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppe
 	rf.cond.L.Lock()
 
 	if len(args.Entries) > 0 {
-		fmt.Printf("HandleAppendEntryLog WILL called in node: %d and log length: %d 6 TIMES\n", rf.me, len(args.Entries))
+		fmt.Printf("HandleAppendEntryLog WILL called in node: %d and log length: %d\n", rf.me, len(args.Entries))
 		fmt.Printf("Value of prevLogIndex: %d and leaderCommit: %d\n", args.PrevLogIndex, args.LeaderCommit)
 
 		for _, val := range args.Entries {
@@ -360,7 +364,9 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppe
 			// Because in this case, when outdated leader tries to send heartbeat/append entry
 			// messages, other followers detects this leader's term < their terms then reply
 			// their terms. Outdated leader, based on follower's response will step down to follower.
+			fmt.Printf("namnh check node: %d receive heartbeat when trying to elect at :%d state\n", rf.me, rf.state)
 			isCandidate = true
+			go func() { rf.appendEntryResponses <- isCandidate }()
 		}
 
 		rf.state = Follower
@@ -373,9 +379,9 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppe
 
 		// Send message to collectVote flow that node accepts another node as its leader
 		// rf.appendEntryResponses <- reply.Success
-		if isCandidate {
-			go func() { rf.appendEntryResponses <- isCandidate }()
-		}
+		// if isCandidate {
+		// 	go func() { rf.appendEntryResponses <- isCandidate }()
+		// }
 
 		return
 	}
