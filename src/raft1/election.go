@@ -26,7 +26,7 @@ type RequestVoteReply struct {
 
 // NEED to acquire lock before calling
 func (rf *Raft) ResetElectionTimeout() {
-	newElectionTimeout := (400 + (rand.Int63n(201)))
+	newElectionTimeout := (350 + (rand.Int63n(201)))
 	rf.electInterval = newElectionTimeout
 	if rf.electionTimer != nil {
 		rf.electionTimer.Stop()
@@ -38,8 +38,8 @@ func (rf *Raft) ResetElectionTimeout() {
 // RequestVote RPC handler.
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (3A, 3B).
-	rf.mutex.Lock()
-	defer rf.mutex.Unlock()
+	rf.cond.L.Lock()
+	defer rf.cond.L.Unlock()
 
 	if args.Term < rf.currentTerm {
 		reply.VoteGranted = false
@@ -57,9 +57,9 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// TODO(namnh, 3B) : Modify this method for Lab3B
 	// If hadn't voted for anyone else in this term, or voted for candidate sent request this term
 	// or candidate'sterm > node's current term && candidate's log is up-to-date
-	fmt.Printf("BEFORE CONDITION Node: %d become follower and voted for: %d with currentTerm: %d\n", rf.me, args.CandidateId, rf.currentTerm)
-	fmt.Printf("BEFORE CONDITION Value of args candidate. args.term: %d, Args.LastLogIndex: %d, args.LastLogTerm: %d\n", args.Term, args.LastLogIndex, args.LastLogTerm)
-	fmt.Printf("BEFORE CONDITION Value of voted node rf.log[len(rf.log)-1].Term: %d, and len of log len(rf.log)-1): %d\n", rf.log[len(rf.log)-1].Term, len(rf.log)-1)
+	// fmt.Printf("BEFORE CONDITION Node: %d become follower and voted for: %d with currentTerm: %d\n", rf.me, args.CandidateId, rf.currentTerm)
+	// fmt.Printf("BEFORE CONDITION Value of args candidate. args.term: %d, Args.LastLogIndex: %d, args.LastLogTerm: %d\n", args.Term, args.LastLogIndex, args.LastLogTerm)
+	// fmt.Printf("BEFORE CONDITION Value of voted node rf.log[len(rf.log)-1].Term: %d, and len of log len(rf.log)-1): %d\n", rf.log[len(rf.log)-1].Term, len(rf.log)-1)
 
 	// if rf.votedFor == -1 || rf.votedFor == args.CandidateId || args.Term > rf.currentTerm &&
 	// 	(args.LastLogTerm > rf.log[len(rf.log)-1].Term || (args.LastLogTerm == rf.log[len(rf.log)-1].Term && args.LastLogIndex >= len(rf.log)-1)) {
@@ -81,16 +81,26 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// }
 
 	if rf.votedFor == -1 || rf.votedFor == args.CandidateId || args.Term > rf.currentTerm {
+		fmt.Printf("Node: %d at state: %d become follower\n", rf.me, rf.state)
+
 		rf.currentTerm = args.Term
-		rf.votedFor = args.CandidateId
+		// rf.votedFor = args.CandidateId
+		rf.state = Follower
+		reply.Term = rf.currentTerm
 
 		if args.LastLogTerm > rf.log[len(rf.log)-1].Term || (args.LastLogTerm == rf.log[len(rf.log)-1].Term && args.LastLogIndex >= len(rf.log)-1) {
-			rf.state = Follower
+			// fmt.Printf("Node: %d at state: %d become follower\n", rf.me, rf.state)
+			// rf.state = Follower
 
-			reply.Term = rf.currentTerm
+			rf.votedFor = args.CandidateId
+			// reply.Term = rf.currentTerm
 			reply.VoteGranted = true
 			rf.ResetElectionTimeout()
+
+			return
 		}
+
+		reply.VoteGranted = false
 
 		return
 	}
@@ -152,6 +162,8 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	if !ok {
 		return ok
 	}
+
+	fmt.Printf("Node: %d requesting vote. Who voted ok: %t\n", rf.me, reply.VoteGranted)
 
 	voteResult <- reply
 	return ok
@@ -284,7 +296,7 @@ func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
 			// // Transit from canditate -> follower
 			// rf.state = Follower
 			// // Reupdate latest time that a node receives a heartbeat message
-			// rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
+			rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
 			// rf.votedFor = -1
 			// rf.ResetElectionTimeout()
 
@@ -294,6 +306,7 @@ func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
 		case <-rf.electionTimer.C:
 			// Out of time election. Reelect with next term
 			rf.cond.L.Lock()
+			fmt.Printf("Node: %d continue voting at next phase\n", rf.me)
 			// Reset election timeout for next round
 			rf.ResetElectionTimeout()
 			rf.cond.L.Unlock()

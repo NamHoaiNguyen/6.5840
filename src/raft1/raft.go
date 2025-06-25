@@ -123,7 +123,7 @@ func (rf *Raft) GetState() (int, bool) {
 
 // NEED to acquire lock before calling
 func (rf *Raft) ResetHeartbeatTimeout() {
-	newHeartbeatTimeout := (100 + (rand.Int63() % 150))
+	newHeartbeatTimeout := (100 + (rand.Int63() % 51))
 	rf.heartbeatInterval = newHeartbeatTimeout
 	if rf.heartBeatTimer != nil {
 		rf.heartBeatTimer.Stop()
@@ -201,6 +201,9 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.cond.L.Lock()
 	defer rf.cond.L.Unlock()
 
+	fmt.Printf("Node: %d receive command with state: %d\n", rf.me, rf.state)
+	fmt.Println("Value of command that node receive", command)
+
 	if rf.state != Leader {
 		return -1, -1, false
 	}
@@ -216,7 +219,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.matchIndex[rf.me] = len(rf.log) - 1
 	rf.nextIndex[rf.me] = rf.matchIndex[rf.me] + 1
 
-	fmt.Printf("Leader is :%d\n", rf.me)
+	fmt.Printf("Leader is :%d and currentTerm: %d\n", rf.me, rf.currentTerm)
 	fmt.Println("Namnh check rf.log at leader node each PUT command: ", rf.log)
 
 	// Replicate leader's log to other nodes

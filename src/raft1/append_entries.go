@@ -92,12 +92,23 @@ func (rf *Raft) SendHeartbeats() {
 // log until the point that both node agree with each other about this log.
 func (rf *Raft) SendAppendEntries() {
 	// for !rf.killed() {
+	// rf.cond.L.Lock()
+	// for rf.state != Leader {
+	// 	// Only leader can send append entries message
+	// 	rf.cond.Wait()
+	// 	// TODO(namnh, 3B) : Recheck using condition variable at here?
+	// }
+	// rf.cond.L.Unlock()
+
 	rf.cond.L.Lock()
-	for rf.state != Leader {
-		// Only leader can send append entries message
-		rf.cond.Wait()
-		// TODO(namnh, 3B) : Recheck using condition variable at here?
+	if rf.state != Leader {
+		fmt.Printf("Only leader can send append entries request. You CAN'T: %d!!!", rf.me)
+		rf.cond.L.Unlock()
+		return
 	}
+	// rf.cond.L.Unlock()
+
+	fmt.Printf("NODE: %d TRY TO SEND APPEND ENTRY MESSAGE\n!!!", rf.me)
 	rf.cond.L.Unlock()
 
 	for i := 0; i < len(rf.peers); i++ {
@@ -194,20 +205,28 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, 
 	rf.cond.L.Lock()
 	defer rf.cond.L.Unlock()
 
-	if appendEntryRes.Term != rf.currentTerm || rf.state != Leader {
-		// If leader isn't leader anymore
-		// or leader's term isn't the same as before
-		return
-	}
+	// if appendEntryRes.Term != rf.currentTerm || rf.state != Leader {
+	// 	fmt.Println("I AM NOT MYSELF ANYMORE!!!")
+	// 	// If leader isn't leader anymore
+	// 	// or leader's term isn't the same as before
+	// 	return
+	// }
 
 	if appendEntryRes.Term > rf.currentTerm {
-		// fmt.Printf("Leader: %d should step down!!!\n", rf.me)
+		fmt.Printf("Leader: %d should step down. appendEntryRes.Term: %d, current term of leader: %d!!!\n", rf.me, appendEntryRes.Term, rf.currentTerm)
 		// Leader MUST step down if follower's term > leader's term
 		rf.state = Follower
 		// Reupdate leader's term
 		rf.currentTerm = appendEntryRes.Term
 		rf.votedFor = -1
 
+		return
+	}
+
+	if appendEntryRes.Term != rf.currentTerm || rf.state != Leader {
+		fmt.Printf("I AM NOT MYSELF ANYMORE: %d!!!", rf.me)
+		// If leader isn't leader anymore
+		// or leader's term isn't the same as before
 		return
 	}
 
@@ -285,7 +304,7 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, 
 		N -= 1
 	}
 
-	fmt.Printf("Value of rf.commitIndex BEFORE updated: %d at leader: %d\n", rf.commitIndex, rf.me)
+	// fmt.Printf("Value of rf.commitIndex BEFORE updated: %d at leader: %d\n", rf.commitIndex, rf.me)
 
 	rf.commitIndex = N
 
@@ -300,15 +319,15 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppe
 	// If is heartbeat message
 	rf.cond.L.Lock()
 
-	if len(args.Entries) > 0 {
-		fmt.Printf("HandleAppendEntryLog WILL called in node: %d and log length: %d\n", rf.me, len(args.Entries))
-		fmt.Printf("Value of prevLogIndex: %d and leaderCommit: %d\n", args.PrevLogIndex, args.LeaderCommit)
+	// if len(args.Entries) > 0 {
+	// 	fmt.Printf("HandleAppendEntryLog WILL called in node: %d and log length: %d\n", rf.me, len(args.Entries))
+	// 	fmt.Printf("Value of prevLogIndex: %d and leaderCommit: %d\n", args.PrevLogIndex, args.LeaderCommit)
 
-		for _, val := range args.Entries {
-			fmt.Printf("Value of Term: %d and index: %d\n", val.Term, val.Index)
-			fmt.Println("Value of command", val.Command)
-		}
-	}
+	// 	for _, val := range args.Entries {
+	// 		fmt.Printf("Value of Term: %d and index: %d\n", val.Term, val.Index)
+	// 		fmt.Println("Value of command", val.Command)
+	// 	}
+	// }
 
 	// Always return node's currentTerm
 	reply.Term = rf.currentTerm
@@ -354,6 +373,10 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppe
 		rf.commitIndex = min(args.LeaderCommit, len(rf.log)-1)
 	}
 
+	// TODO(namnh, 3B) : Recheck this one
+	rf.state = Follower
+	rf.votedFor = -1
+
 	if args.Entries == nil {
 		// Heartbeat message
 		// fmt.Println("Is heartbeat message!!!")
@@ -369,8 +392,8 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppe
 			go func() { rf.appendEntryResponses <- isCandidate }()
 		}
 
-		rf.state = Follower
-		rf.votedFor = -1
+		// rf.state = Follower
+		// rf.votedFor = -1
 		// Reupdate last time receive heartbeat message
 		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
 
@@ -443,6 +466,8 @@ func (rf *Raft) HandleAppendEntryLog(args *RequestAppendEntriesArgs,
 
 	// if (numEntries < len(args.Entries)) {
 	rf.log = append(rf.log, args.Entries[numEntries:]...)
+	fmt.Printf("Log of node: %d after be appended\n", rf.me)
+	fmt.Println("LOG!!!", rf.log)
 	// }
 
 	// rf.log = append(rf.log, args.Entries...)

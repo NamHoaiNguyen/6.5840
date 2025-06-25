@@ -2,6 +2,8 @@ package raft
 
 import (
 	"fmt"
+	"log"
+
 	//log
 	"math/rand"
 	"sync"
@@ -242,7 +244,7 @@ func (ts *Test) one(cmd any, expectedServers int, retry bool) int {
 				ts.srvs[starts].mu.Unlock()
 			}
 			if rf != nil {
-				//log.Printf("peer %d Start %v", starts, cmd)
+				log.Printf("NAMNH peer %d CALL Start %v", starts, cmd)
 				index1, _, ok := rf.Start(cmd)
 				if ok {
 					index = index1
