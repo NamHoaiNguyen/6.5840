@@ -174,8 +174,9 @@ func (rf *Raft) StartElect() {
 	for !rf.killed() {
 		rf.cond.L.Lock()
 
-		if time.Now().UnixMilli()-rf.lastHeartbeatTimeRecv < rf.electInterval ||
-			rf.state == Leader {
+		// if time.Now().UnixMilli()-rf.lastHeartbeatTimeRecv < rf.electInterval ||
+		// 	rf.state == Leader {
+		if time.Now().UnixMilli()-rf.lastHeartbeatTimeRecv < rf.electInterval {
 			rf.cond.L.Unlock()
 
 			time.Sleep(time.Duration(rf.electInterval) * time.Millisecond)
@@ -293,13 +294,6 @@ func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
 			// // Candidate receive append entries node from leader
 			rf.cond.L.Lock()
 			fmt.Printf("Node: %d steps to follower\n", rf.me)
-			// // Transit from canditate -> follower
-			// rf.state = Follower
-			// // Reupdate latest time that a node receives a heartbeat message
-			rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
-			// rf.votedFor = -1
-			// rf.ResetElectionTimeout()
-
 			rf.cond.L.Unlock()
 
 			return

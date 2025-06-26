@@ -2,7 +2,6 @@ package raft
 
 import (
 	"fmt"
-	"log"
 
 	//log
 	"math/rand"
@@ -243,8 +242,10 @@ func (ts *Test) one(cmd any, expectedServers int, retry bool) int {
 				rf = ts.srvs[starts].raft
 				ts.srvs[starts].mu.Unlock()
 			}
+			// leader3 := ts.checkOneLeader()
+			fmt.Printf("SERVER: %d SHOULD BE READY TO SEND MESSAGE\n", starts)
 			if rf != nil {
-				log.Printf("NAMNH peer %d CALL Start %v", starts, cmd)
+				// log.Printf("NAMNH peer %d CALL Start %v", starts, cmd)
 				index1, _, ok := rf.Start(cmd)
 				if ok {
 					index = index1
@@ -280,6 +281,7 @@ func (ts *Test) one(cmd any, expectedServers int, retry bool) int {
 		}
 	}
 	if ts.checkFinished() == false {
+		fmt.Println("namnh check that ts.checkFinished() = false")
 		desp := fmt.Sprintf("agreement of %.8s failed", textcmd)
 		tester.AnnotateCheckerFailure(desp, "failed after 10-second timeout")
 		ts.Fatalf("one(%v) failed to reach agreement", cmd)

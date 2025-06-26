@@ -102,7 +102,7 @@ func (rf *Raft) SendAppendEntries() {
 
 	rf.cond.L.Lock()
 	if rf.state != Leader {
-		fmt.Printf("Only leader can send append entries request. You CAN'T: %d!!!", rf.me)
+		fmt.Printf("Only leader can send append entries request. You CAN'T: %d\n!!!", rf.me)
 		rf.cond.L.Unlock()
 		return
 	}
@@ -213,7 +213,7 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, 
 	// }
 
 	if appendEntryRes.Term > rf.currentTerm {
-		fmt.Printf("Leader: %d should step down. appendEntryRes.Term: %d, current term of leader: %d!!!\n", rf.me, appendEntryRes.Term, rf.currentTerm)
+		fmt.Printf("Leader: %d should step down. appendEntryRes.Term: %d, current term of leader: %d. Node: %d who sent that message make me step down!!!\n", rf.me, appendEntryRes.Term, rf.currentTerm, server)
 		// Leader MUST step down if follower's term > leader's term
 		rf.state = Follower
 		// Reupdate leader's term
@@ -224,10 +224,15 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, 
 	}
 
 	if appendEntryRes.Term != rf.currentTerm || rf.state != Leader {
-		fmt.Printf("I AM NOT MYSELF ANYMORE: %d!!!", rf.me)
+		fmt.Printf("I AM NOT MYSELF ANYMORE: %d. MY STATE IS : %d. My term after: %d and before: %d!!!", rf.me, rf.state, appendEntryRes.Term, rf.currentTerm)
 		// If leader isn't leader anymore
 		// or leader's term isn't the same as before
 		return
+	}
+
+	if isHeartbeat {
+		// Reupdate last time receive heartbeat EVEN node is LEADER
+		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
 	}
 
 	// Now leader 's term >= node's term
@@ -455,6 +460,7 @@ func (rf *Raft) HandleAppendEntryLog(args *RequestAppendEntriesArgs,
 		}
 
 		if logEntryIndex < len(rf.log) && logEntryTerm != rf.log[logEntryIndex].Term {
+			fmt.Printf("Namnh check value of logEntryIndex: %d and logEntryTerm: %d\n", logEntryIndex, logEntryTerm)
 			// delete the existing entry and all that follow it
 			rf.log = rf.log[:logEntryIndex]
 			// In case condition is hit, all following entry after logEntryIndex was deleted.
