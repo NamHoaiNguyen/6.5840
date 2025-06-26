@@ -539,8 +539,8 @@ func TestBackup3B(t *testing.T) {
 	ts.g.DisconnectAll((leader1 + 4) % servers)
 	tester.AnnotateConnection(ts.g.GetConnected())
 
-	fmt.Printf("Value of leader and follower in partion. Leader: %d and follower:%d\n", leader1, leader1 + 1)
-	fmt.Printf("Value of folloers that disconnected but belongs to majority group: %d, %d, %d\n", (leader1 + 2) % servers, (leader1 + 3) % servers, (leader1 + 4) % servers)
+	fmt.Printf("Value of leader and follower in partion. Leader: %d and follower:%d\n", leader1, leader1+1)
+	fmt.Printf("Value of folloers that disconnected but belongs to majority group: %d, %d, %d\n", (leader1+2)%servers, (leader1+3)%servers, (leader1+4)%servers)
 
 	// submit lots of commands that won't commit
 	start := tester.GetAnnotateTimestamp()
@@ -561,7 +561,7 @@ func TestBackup3B(t *testing.T) {
 	ts.g.ConnectOne((leader1 + 4) % servers)
 	tester.AnnotateConnection(ts.g.GetConnected())
 
-	fmt.Printf("Value of majority of followers that RECOVER: %d, %d, %d\n", (leader1 + 2) % servers, (leader1 + 3) % servers, (leader1 + 4) % servers)
+	fmt.Printf("Value of majority of followers that RECOVER: %d, %d, %d\n", (leader1+2)%servers, (leader1+3)%servers, (leader1+4)%servers)
 
 	// lots of successful commands to new group.
 	for i := 0; i < 50; i++ {

@@ -137,8 +137,6 @@ func (rf *Raft) RetrySendAppendEntries() {
 	}
 }
 
-
-
 // Leader execute append entry requests and handle response
 func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, isRetry bool) {
 	rf.cond.L.Lock()
@@ -375,10 +373,10 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppe
 	// Except 2 above conditons, success = true
 	// reply.Success = true
 
-	if args.LeaderCommit > rf.commitIndex {
-		// fmt.Printf("Follower : %d receive leaderCommit: %d > its commitIndex: %d and index of log \n", rf.me, args.LeaderCommit, rf.commitIndex)
-		rf.commitIndex = min(args.LeaderCommit, len(rf.log)-1)
-	}
+	// if args.LeaderCommit > rf.commitIndex {
+	// 	// fmt.Printf("Follower : %d receive leaderCommit: %d > its commitIndex: %d and index of log \n", rf.me, args.LeaderCommit, rf.commitIndex)
+	// 	rf.commitIndex = min(args.LeaderCommit, len(rf.log)-1)
+	// }
 
 	// TODO(namnh, 3B) : Recheck this one
 	rf.state = Follower
@@ -403,6 +401,12 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppe
 		// rf.votedFor = -1
 		// Reupdate last time receive heartbeat message
 		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
+
+		if args.LeaderCommit > rf.commitIndex {
+			fmt.Printf("Follower : %d receive leaderCommit: %d > its commitIndex: %d. Its lastApplied: %d\n", rf.me, args.LeaderCommit, rf.commitIndex, rf.lastApplied)
+			rf.commitIndex = min(args.LeaderCommit, args.PrevLogIndex)
+			fmt.Printf("Value of rf.commitIndex AFTER updated: %d at leader: %d 1!!!\n", rf.commitIndex, rf.me)
+		}
 
 		reply.Success = true
 		rf.cond.L.Unlock()
@@ -488,10 +492,10 @@ func (rf *Raft) HandleAppendEntryLog(args *RequestAppendEntriesArgs,
 	// 	fmt.Printf("Follower : %d receive leaderCommit: %d and its commitIndex: %d\n", rf.me, args.LeaderCommit, rf.commitIndex)
 	// }
 
-	// if args.LeaderCommit > rf.commitIndex {
-	// 	// fmt.Printf("Follower : %d receive leaderCommit: %d > its commitIndex: %d\n", rf.me, args.LeaderCommit, rf.commitIndex)
-	// 	rf.commitIndex = min(args.LeaderCommit, len(rf.log)-1)
-	// }
+	if args.LeaderCommit > rf.commitIndex {
+		// fmt.Printf("Follower : %d receive leaderCommit: %d > its commitIndex: %d\n", rf.me, args.LeaderCommit, rf.commitIndex)
+		rf.commitIndex = min(args.LeaderCommit, len(rf.log)-1)
+	}
 
 	// TODO(namnh, 3B, IMPORTANT) : CHECK THIS CAREFULLY!!!
 	// Maybe the reason is above logic wrong
