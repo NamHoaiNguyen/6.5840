@@ -137,6 +137,8 @@ func (rf *Raft) RetrySendAppendEntries() {
 	}
 }
 
+
+
 // Leader execute append entry requests and handle response
 func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, isRetry bool) {
 	rf.cond.L.Lock()
@@ -230,10 +232,10 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, 
 		return
 	}
 
-	if isHeartbeat {
-		// Reupdate last time receive heartbeat EVEN node is LEADER
-		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
-	}
+	// if isHeartbeat {
+	// 	// Reupdate last time receive heartbeat EVEN node is LEADER
+	// 	rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
+	// }
 
 	// Now leader 's term >= node's term
 	if !appendEntryRes.Success {

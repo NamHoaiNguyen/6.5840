@@ -174,9 +174,9 @@ func (rf *Raft) StartElect() {
 	for !rf.killed() {
 		rf.cond.L.Lock()
 
-		// if time.Now().UnixMilli()-rf.lastHeartbeatTimeRecv < rf.electInterval ||
-		// 	rf.state == Leader {
-		if time.Now().UnixMilli()-rf.lastHeartbeatTimeRecv < rf.electInterval {
+		if time.Now().UnixMilli()-rf.lastHeartbeatTimeRecv < rf.electInterval ||
+			rf.state == Leader {
+		// if time.Now().UnixMilli()-rf.lastHeartbeatTimeRecv < rf.electInterval {
 			rf.cond.L.Unlock()
 
 			time.Sleep(time.Duration(rf.electInterval) * time.Millisecond)
