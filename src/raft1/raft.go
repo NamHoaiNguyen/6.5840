@@ -220,7 +220,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.nextIndex[rf.me] = rf.matchIndex[rf.me] + 1
 
 	fmt.Printf("Leader is :%d and currentTerm: %d\n", rf.me, rf.currentTerm)
-	fmt.Println("Namnh check rf.log at leader node each PUT command: ", rf.log)
+	// fmt.Println("Namnh check rf.log at leader node each PUT command: ", rf.log)
 
 	// Replicate leader's log to other nodes
 	go rf.SendAppendEntries()

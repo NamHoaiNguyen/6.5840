@@ -154,11 +154,11 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, 
 
 	// fmt.Printf("Before Value of isRetry: %t and rf.nextIndex[server]: %d\n", isRetry, rf.nextIndex[server])
 
-	if isRetry {
-		// If leader and node's log mitmatch, decrease nextIndex
-		rf.nextIndex[server]--
-		// fmt.Printf("After Value of isRetry: %t and rf.nextIndex[server]: %d\n", isRetry, rf.nextIndex[server])
-	}
+	// if isRetry {
+	// 	// If leader and node's log mitmatch, decrease nextIndex
+	// 	rf.nextIndex[server]--
+	// 	// fmt.Printf("After Value of isRetry: %t and rf.nextIndex[server]: %d\n", isRetry, rf.nextIndex[server])
+	// }
 
 	prevLogIndex := 0
 	if rf.nextIndex[server] >= 1 {
@@ -194,11 +194,11 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, 
 		// Resend append entry request if false
 		// In this case, isRetry shouldbe = false
 		// because nextIndex shouldn't be updated
-		if !isHeartbeat {
-			// fmt.Printf("There is problem when sending append entry message to node: %d\n", server)
-			// go rf.SendAppendEntries(false /*isRetry*/)
-			rf.retryCh <- server
-		}
+		// if !isHeartbeat {
+		// 	// fmt.Printf("There is problem when sending append entry message to node: %d\n", server)
+		// 	// go rf.SendAppendEntries(false /*isRetry*/)
+		// 	rf.retryCh <- server
+		// }
 		return
 	}
 
@@ -313,6 +313,21 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, 
 
 	rf.commitIndex = N
 
+	// for index, log := range rf.log {
+	// 	count := 0
+	// 	for peer := range rf.peers {
+	// 		if rf.matchIndex[peer] >= index {
+	// 			count++
+	// 		}
+	// 	}
+	// 	// If there exists an N such that N > commitIndex, a majority
+	// 	// of matchIndex[i] ≥ N, and log[N].term == currentTerm:
+	// 	// set commitIndex = N (§5.3, §5.4).
+	// 	if count > len(rf.peers)/2 && index > rf.commitIndex && log.Term == rf.currentTerm {
+	// 		rf.commitIndex = index
+	// 	}
+	// }
+
 	fmt.Printf("Value of rf.commitIndex AFTER updated: %d at leader: %d\n", rf.commitIndex, rf.me)
 
 	// TODO(namnh, 3B) : Signal to update state machine to flush
@@ -402,6 +417,7 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppe
 		// Reupdate last time receive heartbeat message
 		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
 
+		// TODO(namnh, 3B, IMPORTANT) : THIS CORRECT OF LOGIC IS VERY IMPORTANT.
 		if args.LeaderCommit > rf.commitIndex {
 			fmt.Printf("Follower : %d receive leaderCommit: %d > its commitIndex: %d. Its lastApplied: %d\n", rf.me, args.LeaderCommit, rf.commitIndex, rf.lastApplied)
 			rf.commitIndex = min(args.LeaderCommit, args.PrevLogIndex)
@@ -411,11 +427,11 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppe
 		reply.Success = true
 		rf.cond.L.Unlock()
 
-		// Send message to collectVote flow that node accepts another node as its leader
-		// rf.appendEntryResponses <- reply.Success
-		// if isCandidate {
-		// 	go func() { rf.appendEntryResponses <- isCandidate }()
-		// }
+		// // Send message to collectVote flow that node accepts another node as its leader
+		// // rf.appendEntryResponses <- reply.Success
+		// // if isCandidate {
+		// // 	go func() { rf.appendEntryResponses <- isCandidate }()
+		// // }
 
 		return
 	}
@@ -476,10 +492,12 @@ func (rf *Raft) HandleAppendEntryLog(args *RequestAppendEntriesArgs,
 		}
 	}
 
-	// if (numEntries < len(args.Entries)) {
 	rf.log = append(rf.log, args.Entries[numEntries:]...)
-	fmt.Printf("Log of node: %d after be appended\n", rf.me)
-	fmt.Println("LOG!!!", rf.log)
+
+	// if (numEntries < len(args.Entries)) {
+	// rf.log = append(rf.log, args.Entries[numEntries:]...)
+	fmt.Printf("Last log index :%d of Log of node: %d after be appended\n", len(rf.log) - 1, rf.me)
+	// fmt.Println("LOG!!!", rf.log)
 	// }
 
 	// rf.log = append(rf.log, args.Entries...)
@@ -493,8 +511,8 @@ func (rf *Raft) HandleAppendEntryLog(args *RequestAppendEntriesArgs,
 	// }
 
 	if args.LeaderCommit > rf.commitIndex {
-		// fmt.Printf("Follower : %d receive leaderCommit: %d > its commitIndex: %d\n", rf.me, args.LeaderCommit, rf.commitIndex)
-		rf.commitIndex = min(args.LeaderCommit, len(rf.log)-1)
+		fmt.Printf("Follower : %d receive leaderCommit: %d > its commitIndex: %d\n", rf.me, args.LeaderCommit, rf.commitIndex)
+			rf.commitIndex = min(args.LeaderCommit, len(rf.log)-1)
 	}
 
 	// TODO(namnh, 3B, IMPORTANT) : CHECK THIS CAREFULLY!!!
