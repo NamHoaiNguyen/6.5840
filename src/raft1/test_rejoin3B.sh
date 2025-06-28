@@ -1,7 +1,7 @@
 #!/bin/bash
 
-NUM_RUNS=20
-TEST_NAME="TestRejoin3B"
+NUM_RUNS=100
+TEST_NAME="TestBackup3B"
 
 pass_count=0
 fail_count=0

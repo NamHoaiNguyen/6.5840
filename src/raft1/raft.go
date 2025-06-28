@@ -9,7 +9,6 @@ package raft
 import (
 	//	"bytes"
 
-	"fmt"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -123,7 +122,7 @@ func (rf *Raft) GetState() (int, bool) {
 
 // NEED to acquire lock before calling
 func (rf *Raft) ResetHeartbeatTimeout() {
-	newHeartbeatTimeout := (100 + (rand.Int63() % 51))
+	newHeartbeatTimeout := (100 + (rand.Int63() % 31))
 	rf.heartbeatInterval = newHeartbeatTimeout
 	if rf.heartBeatTimer != nil {
 		rf.heartBeatTimer.Stop()
@@ -201,8 +200,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.cond.L.Lock()
 	defer rf.cond.L.Unlock()
 
-	fmt.Printf("Node: %d receive command with state: %d\n", rf.me, rf.state)
-	fmt.Println("Value of command that node receive", command)
+	// fmt.Printf("Node: %d receive command with state: %d\n", rf.me, rf.state)
+	// fmt.Println("Value of command that node receive", command)
 
 	if rf.state != Leader {
 		return -1, -1, false
@@ -216,16 +215,19 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	}
 	rf.log = append(rf.log, newLogEntry)
 
-	rf.matchIndex[rf.me] = len(rf.log) - 1
+	// rf.matchIndex[rf.me] = len(rf.log) - 1
+	// rf.nextIndex[rf.me] = rf.matchIndex[rf.me] + 1
+
+	rf.matchIndex[rf.me] = rf.log[len(rf.log)-1].Index
 	rf.nextIndex[rf.me] = rf.matchIndex[rf.me] + 1
 
-	fmt.Printf("Leader is :%d and currentTerm: %d\n", rf.me, rf.currentTerm)
+	// fmt.Printf("Leader is :%d and currentTerm: %d\n", rf.me, rf.currentTerm)
 	// fmt.Println("Namnh check rf.log at leader node each PUT command: ", rf.log)
 
 	// Replicate leader's log to other nodes
 	go rf.SendAppendEntries()
 
-	return len(rf.log) - 1, int(rf.currentTerm), (rf.state == Leader)
+	return rf.log[len(rf.log)-1].Index, int(rf.currentTerm), (rf.state == Leader)
 }
 
 // the tester doesn't halt goroutines created by Raft after each test,
@@ -307,7 +309,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// Background task which update log to state machine
 	go rf.UpdateStateMachineLog()
 	// Init retry sending message
-	go rf.RetrySendAppendEntries()
+	// go rf.RetrySendAppendEntries()
 
 	return rf
 }

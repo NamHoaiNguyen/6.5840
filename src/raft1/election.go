@@ -26,7 +26,7 @@ type RequestVoteReply struct {
 
 // NEED to acquire lock before calling
 func (rf *Raft) ResetElectionTimeout() {
-	newElectionTimeout := (350 + (rand.Int63n(201)))
+	newElectionTimeout := (350 + (rand.Int63n(151)))
 	rf.electInterval = newElectionTimeout
 	if rf.electionTimer != nil {
 		rf.electionTimer.Stop()
@@ -88,8 +88,12 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.state = Follower
 		reply.Term = rf.currentTerm
 
-		if args.LastLogTerm > rf.log[len(rf.log)-1].Term || (args.LastLogTerm == rf.log[len(rf.log)-1].Term && args.LastLogIndex >= len(rf.log)-1) {
-			// fmt.Printf("Node: %d at state: %d become follower\n", rf.me, rf.state)
+		if (args.LastLogTerm > rf.log[len(rf.log)-1].Term) ||
+			(args.LastLogTerm == rf.log[len(rf.log)-1].Term && args.LastLogIndex >= rf.log[len(rf.log)-1].Index) {
+			fmt.Printf("Node: %d at state: %d become follower and voted for node: %d \n", rf.me, rf.state, args.CandidateId)
+			fmt.Printf("args.LastLogTerm is: %d, args.LastLogIndex: %d\n", args.LastLogTerm, args.LastLogIndex)
+			fmt.Printf("rf.log[len(rf.log)-1].Term is: %d, rf.log[len(rf.log)-1].Index: %d\n", rf.log[len(rf.log)-1].Term, rf.log[len(rf.log)-1].Index)
+
 			// rf.state = Follower
 
 			rf.votedFor = args.CandidateId
@@ -163,7 +167,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 		return ok
 	}
 
-	fmt.Printf("Node: %d requesting vote. Who voted ok: %t\n", rf.me, reply.VoteGranted)
+	// fmt.Printf("Node: %d requesting vote. Who voted ok: %t\n", rf.me, reply.VoteGranted)
 
 	voteResult <- reply
 	return ok
@@ -176,7 +180,7 @@ func (rf *Raft) StartElect() {
 
 		if time.Now().UnixMilli()-rf.lastHeartbeatTimeRecv < rf.electInterval ||
 			rf.state == Leader {
-		// if time.Now().UnixMilli()-rf.lastHeartbeatTimeRecv < rf.electInterval {
+			// if time.Now().UnixMilli()-rf.lastHeartbeatTimeRecv < rf.electInterval {
 			rf.cond.L.Unlock()
 
 			time.Sleep(time.Duration(rf.electInterval) * time.Millisecond)
@@ -190,15 +194,16 @@ func (rf *Raft) StartElect() {
 		// Increment its current term
 		rf.currentTerm++
 
-		fmt.Printf("Node: %d become candidate: %d with current term: %d\n", rf.me, rf.state, rf.currentTerm)
+		// fmt.Printf("Node: %d become candidate: %d with current term: %d\n", rf.me, rf.state, rf.currentTerm)
 
 		// Prepate request vote request
 		// TODO(namnh, 3B) : Modify request
 		voteReq := &RequestVoteArgs{
-			Term:         rf.currentTerm,
-			CandidateId:  rf.me,                        // Node vote for itself to become leader
-			LastLogIndex: (len(rf.log) - 1),            // index of candidate's last log entry
-			LastLogTerm:  (rf.log[len(rf.log)-1].Term), // term of candidate's last log entry
+			Term:        rf.currentTerm,
+			CandidateId: rf.me, // Node vote for itself to become leader
+			// LastLogIndex: len(rf.log) - 1,            // index of candidate's last log entry
+			LastLogIndex: rf.log[len(rf.log)-1].Index,
+			LastLogTerm:  rf.log[len(rf.log)-1].Term, // term of candidate's last log entry
 		}
 
 		sleepInterval := rf.electInterval
@@ -249,7 +254,7 @@ func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
 				// If someone else replies a term > candidate's current term,
 				// candidate steps back to follower and update it current term
 				// with reply's term
-				fmt.Printf("node: %d at state: %d become follower when voting\n", rf.me, rf.state)
+				// fmt.Printf("node: %d at state: %d become follower when voting\n", rf.me, rf.state)
 				rf.currentTerm = voteReply.Term
 				rf.state = Follower
 				rf.votedFor = -1
@@ -275,10 +280,15 @@ func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
 					rf.nextIndex = make([]int, len(rf.peers))
 					rf.matchIndex = make([]int, len(rf.peers))
 
-					for index, _ := range rf.nextIndex {
+					for server, _ := range rf.nextIndex {
 						// Initialized to leader last log index + 1
-						rf.nextIndex[index] = len(rf.log)
-						rf.matchIndex[index] = 0
+						rf.nextIndex[server] = rf.log[len(rf.log)-1].Index + 1
+						if server == rf.me {
+							rf.matchIndex[server] = rf.nextIndex[server] - 1
+							continue
+						}
+
+						rf.matchIndex[server] = 0
 					}
 
 					// Notify to sendheartbeats goroutine
