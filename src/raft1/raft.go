@@ -92,6 +92,8 @@ type Raft struct {
 	collectLog map[int]int
 
 	cond *sync.Cond
+
+	peerCond []*sync.Cond
 	// End of data not used in raft algorithm, but for easier to implement
 }
 
@@ -207,7 +209,20 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	// fmt.Println("Namnh check rf.log at leader node each PUT command: ", rf.log)
 
 	// Replicate leader's log to other nodes
-	go rf.SendAppendEntries()
+	// go rf.SendAppendEntries()
+
+	for server := range rf.peers {
+		if server == rf.me {
+			continue
+		}
+
+		rf.peerCond[server].L.Lock()
+		rf.peerCond[server].Signal()
+		rf.peerCond[server].L.Unlock()
+	}
+
+	// go rf.ReplicateLog()
+	// rf.ReplicateLog()
 
 	return rf.log[len(rf.log)-1].Index, int(rf.currentTerm), (rf.state == Leader)
 }
@@ -279,6 +294,11 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.applyCh = applyCh
 
 	rf.cond = sync.NewCond(&rf.mu)
+	rf.peerCond = make([]*sync.Cond, len(rf.peers))
+	for server := range rf.peerCond {
+		// Each peer uses it owns mutex
+		rf.peerCond[server] = sync.NewCond(&sync.Mutex{})
+	}
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
@@ -290,7 +310,14 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// Background task which update log to state machine
 	go rf.UpdateStateMachineLog()
 	// Init retry sending message
-	// go rf.RetrySendAppendEntries()
+	// go rf.ReplicateLog()
+	for server := range rf.peers {
+		if server == rf.me {
+			continue
+		}
+
+		go rf.SendAppendEntriesV2(server)
+	}
 
 	return rf
 }
