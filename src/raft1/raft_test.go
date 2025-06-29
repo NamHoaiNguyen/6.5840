@@ -404,6 +404,8 @@ loop:
 		}
 
 		wg.Wait()
+		fmt.Println("It is hang at here, right!!!")
+
 		close(is)
 
 		for j := 0; j < servers; j++ {

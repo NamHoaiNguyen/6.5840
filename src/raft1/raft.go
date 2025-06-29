@@ -9,7 +9,6 @@ package raft
 import (
 	//	"bytes"
 
-	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -44,12 +43,7 @@ type Raft struct {
 
 	heartbeatInterval int64 // Heartbeat timeout interval of each node
 
-	heartBeatTimer *time.Ticker // Used to send heartbeat each heartbeatInterval
-
 	electInterval int64 // Random election timeout of node(each node has it owns elect interval)
-
-	// If no leader is voted in each election timeout -> start new round election
-	electionTimer *time.Ticker
 
 	// index of highest log entry known to be
 	// committed (initialized to 0, increases
@@ -83,7 +77,7 @@ type Raft struct {
 	// Key is index of log, value is number of nodes that commited that index
 	// During elecction, if candidate's receive appendentry message from other node
 	// if this entry is valid, candidate stops election and becomes follower
-	appendEntryResponses chan bool
+	// appendEntryResponses chan bool
 
 	// Channel to notify that a new election round should be started if no leader
 	// is elected in previous term
@@ -96,8 +90,6 @@ type Raft struct {
 	done chan struct{}
 
 	collectLog map[int]int
-
-	mutex sync.Mutex
 
 	cond *sync.Cond
 	// End of data not used in raft algorithm, but for easier to implement
@@ -118,16 +110,6 @@ func (rf *Raft) GetState() (int, bool) {
 	rf.cond.L.Lock()
 	defer rf.cond.L.Unlock()
 	return int(rf.currentTerm), rf.state == Leader
-}
-
-// NEED to acquire lock before calling
-func (rf *Raft) ResetHeartbeatTimeout() {
-	newHeartbeatTimeout := (100 + (rand.Int63() % 31))
-	rf.heartbeatInterval = newHeartbeatTimeout
-	if rf.heartBeatTimer != nil {
-		rf.heartBeatTimer.Stop()
-	}
-	rf.heartBeatTimer = time.NewTicker((time.Duration)(newHeartbeatTimeout) * time.Millisecond)
 }
 
 // save Raft's persistent state to stable storage,
@@ -275,10 +257,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// Node's beginning state = Follower
 	rf.state = Follower
 	rf.ResetElectionTimeout()
-	rf.ResetHeartbeatTimeout()
+	rf.heartbeatInterval = 125
 
 	// AppendEntries response channel
-	rf.appendEntryResponses = make(chan bool)
 	rf.electionTimeout = make(chan bool)
 
 	// TODO(namnh, 3B) : Start init data

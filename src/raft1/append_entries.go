@@ -34,6 +34,7 @@ func (rf *Raft) UpdateStateMachineLog() {
 		rf.cond.L.Lock()
 
 		// fmt.Printf("Namnh UpdateStateMachineLog Node: %d is :%d state and commitIndex: %d and lastApplied: %d\n", rf.me, rf.state, rf.commitIndex, rf.lastApplied)
+		fmt.Println("SEEM LIKE SOME TIME THAT WE CAN'T TAKE LOCK IN UpdateStateMachineLog")
 
 		for rf.commitIndex > rf.lastApplied {
 			fmt.Printf("Namnh UpdateStateMachineLog Node: %d is :%d state\n", rf.me, rf.state)
@@ -122,21 +123,26 @@ func (rf *Raft) SendAppendEntries() {
 	// }
 }
 
-// Goroutine
-// func (rf *Raft) RetrySendAppendEntries() {
-// 	for !rf.killed() {
-// 		rf.cond.L.Lock()
-// 		for rf.state != Leader {
-// 			rf.cond.Wait()
-// 		}
-// 		rf.cond.L.Unlock()
+func (rf *Raft) SendAppendEntriesV2() {
+	rf.cond.L.Lock()
+	for rf.state != Leader {
+		fmt.Printf("Only leader can send append entries request. You CAN'T: %d\n!!!", rf.me)
+		rf.cond.Wait()
+	}
+	// rf.cond.L.Unlock()
 
-// 		select {
-// 		case server := <-rf.retryCh:
-// 			go rf.LeaderHandleAppendEntriesResponse(server, false /*isHeartbeat*/, false /*isRetry*/)
-// 		}
-// 	}
-// }
+	fmt.Printf("NODE: %d TRY TO SEND APPEND ENTRY MESSAGE\n!!!", rf.me)
+	rf.cond.L.Unlock()
+
+	for i := 0; i < len(rf.peers); i++ {
+		if i == rf.me {
+			continue
+		}
+
+		go rf.LeaderHandleAppendEntriesResponse(i, false /*isHeartbeat*/, false /*isRetry*/)
+	}
+	// }
+}
 
 // Leader execute append entry requests and handle response
 func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, isRetry bool) {
@@ -195,6 +201,11 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, 
 		Entries:      entriesList,
 		LeaderCommit: rf.commitIndex,
 	}
+
+	if isHeartbeat {
+		fmt.Println("Value of matchIndex and nextIndex at LEADER NODE", rf.matchIndex, rf.nextIndex)
+	}
+
 	rf.cond.L.Unlock()
 
 	appendEntryRes := &RequestAppendEntriesReply{}
@@ -214,7 +225,7 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, 
 	}
 
 	rf.cond.L.Lock()
-	defer rf.cond.L.Unlock()
+	// defer rf.cond.L.Unlock()
 
 	// if appendEntryRes.Term != rf.currentTerm || rf.state != Leader {
 	// 	fmt.Println("I AM NOT MYSELF ANYMORE!!!")
@@ -230,7 +241,7 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, 
 		// Reupdate leader's term
 		rf.currentTerm = appendEntryRes.Term
 		rf.votedFor = -1
-
+		rf.cond.L.Unlock()
 		return
 	}
 
@@ -238,13 +249,9 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, 
 		fmt.Printf("I AM NOT MYSELF ANYMORE: %d. MY STATE IS : %d. My term after: %d and before: %d!!!", rf.me, rf.state, appendEntryRes.Term, rf.currentTerm)
 		// If leader isn't leader anymore
 		// or leader's term isn't the same as before
+		rf.cond.L.Unlock()
 		return
 	}
-
-	// if isHeartbeat {
-	// 	// Reupdate last time receive heartbeat EVEN node is LEADER
-	// 	rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
-	// }
 
 	// Now leader 's term >= node's term
 	if !appendEntryRes.Success {
@@ -255,7 +262,7 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, 
 		// Resend log until log between server and follower match.
 		// go rf.SendAppendEntries(false /*isRetry*/)
 		go rf.LeaderHandleAppendEntriesResponse(server, false /*isHearbeat*/, true /*isRetry*/)
-
+		rf.cond.L.Unlock()
 		return
 	}
 
@@ -344,7 +351,7 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool, 
 	// }
 
 	fmt.Printf("Value of rf.commitIndex AFTER updated: %d at leader: %d\n", rf.commitIndex, rf.me)
-
+	rf.cond.L.Unlock()
 	// TODO(namnh, 3B) : Signal to update state machine to flush
 }
 
@@ -409,13 +416,11 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppe
 	// TODO(namnh, 3B) : Recheck this one
 	rf.state = Follower
 	rf.votedFor = -1
-	// Reupdate last time receive heartbeat message
-	rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
 
 	if args.Entries == nil {
 		// Heartbeat message
-		// fmt.Println("Is heartbeat message!!!")
-		var isCandidate bool
+		// Reupdate last time receive heartbeat message
+		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
 		if rf.state == Candidate {
 			// If nodes's current state is candidate, send message to stop electing process
 			// NOTE: In case that an outdated leader rejoin cluster, no need to send anything.
@@ -423,14 +428,15 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppe
 			// messages, other followers detects this leader's term < their terms then reply
 			// their terms. Outdated leader, based on follower's response will step down to follower.
 			fmt.Printf("namnh check node: %d receive heartbeat when trying to elect at :%d state\n", rf.me, rf.state)
-			isCandidate = true
-			go func() { rf.appendEntryResponses <- isCandidate }()
+
 		}
 
 		// TODO(namnh, 3B, IMPORTANT) : THIS CORRECT OF LOGIC IS VERY IMPORTANT.
 		if args.LeaderCommit > rf.commitIndex {
 			fmt.Printf("Follower : %d receive leaderCommit: %d > its commitIndex: %d. Its lastApplied: %d\n", rf.me, args.LeaderCommit, rf.commitIndex, rf.lastApplied)
 			rf.commitIndex = min(args.LeaderCommit, args.PrevLogIndex)
+			// rf.commitIndex = min(args.LeaderCommit, len(rf.log)-1)
+
 			fmt.Printf("Value of rf.commitIndex AFTER updated: %d at leader: %d 1!!!\n", rf.commitIndex, rf.me)
 		}
 
@@ -497,7 +503,7 @@ func (rf *Raft) HandleAppendEntryLog(args *RequestAppendEntriesArgs,
 	// }
 
 	if args.LeaderCommit > rf.commitIndex {
-		fmt.Printf("Follower : %d receive leaderCommit: %d > its commitIndex: %d\n", rf.me, args.LeaderCommit, rf.commitIndex)
+		fmt.Printf("WHEN APPLY LOG ENTRY Follower : %d receive leaderCommit: %d > its commitIndex: %d WHEN APPLY LOG ENTRY\n", rf.me, args.LeaderCommit, rf.commitIndex)
 		rf.commitIndex = min(args.LeaderCommit, len(rf.log)-1)
 	}
 

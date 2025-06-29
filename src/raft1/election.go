@@ -28,11 +28,6 @@ type RequestVoteReply struct {
 func (rf *Raft) ResetElectionTimeout() {
 	newElectionTimeout := (350 + (rand.Int63n(151)))
 	rf.electInterval = newElectionTimeout
-	if rf.electionTimer != nil {
-		rf.electionTimer.Stop()
-	}
-	rf.electionTimer = time.NewTicker(
-		(time.Duration)(newElectionTimeout) * time.Millisecond)
 }
 
 // RequestVote RPC handler.
@@ -41,52 +36,27 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.cond.L.Lock()
 	defer rf.cond.L.Unlock()
 
-	if args.Term < rf.currentTerm {
+	if rf.currentTerm > args.Term {
 		reply.VoteGranted = false
 		reply.Term = rf.currentTerm
 
 		return
 	}
 
-	// Nodes still update it term
-	// rf.currentTerm = args.Term
+	if args.Term > rf.currentTerm {
+		rf.currentTerm = args.Term
+		rf.votedFor = -1
+	}
 
-	// If votedFor is null or candidateId, and candidate’s log is at
-	// least as up-to-date as receiver’s log, grant vote
+	fmt.Printf("rf.votedFor value: %d and args.CandidateId: %d\n", rf.votedFor, args.CandidateId)
 
-	// TODO(namnh, 3B) : Modify this method for Lab3B
-	// If hadn't voted for anyone else in this term, or voted for candidate sent request this term
-	// or candidate'sterm > node's current term && candidate's log is up-to-date
-	// fmt.Printf("BEFORE CONDITION Node: %d become follower and voted for: %d with currentTerm: %d\n", rf.me, args.CandidateId, rf.currentTerm)
-	// fmt.Printf("BEFORE CONDITION Value of args candidate. args.term: %d, Args.LastLogIndex: %d, args.LastLogTerm: %d\n", args.Term, args.LastLogIndex, args.LastLogTerm)
-	// fmt.Printf("BEFORE CONDITION Value of voted node rf.log[len(rf.log)-1].Term: %d, and len of log len(rf.log)-1): %d\n", rf.log[len(rf.log)-1].Term, len(rf.log)-1)
-
-	// if rf.votedFor == -1 || rf.votedFor == args.CandidateId || args.Term > rf.currentTerm &&
-	// 	(args.LastLogTerm > rf.log[len(rf.log)-1].Term || (args.LastLogTerm == rf.log[len(rf.log)-1].Term && args.LastLogIndex >= len(rf.log)-1)) {
-	// 	// if rf.votedFor == -1 || rf.votedFor == args.CandidateId || args.Term > rf.currentTerm {
-	// 	// Update currentTerm, votedFor and steps down to follower
-	// 	fmt.Printf("Node: %d become follower and voted for: %d\n", rf.me, args.CandidateId)
-	// 	fmt.Printf("Value of args candidate. args.term: %d, Args.LastLogIndex: %d, args.LastLogTerm: %d\n", args.Term, args.LastLogIndex, args.LastLogTerm)
-	// 	fmt.Printf("Value of voted node rf.log[len(rf.log)-1].Term: %d, and len of log len(rf.log)-1): %d\n", rf.log[len(rf.log)-1].Term, len(rf.log)-1)
-
-	// 	rf.currentTerm = args.Term
-	// 	rf.votedFor = args.CandidateId
-	// 	rf.state = Follower
-
-	// 	reply.Term = rf.currentTerm
-	// 	reply.VoteGranted = true
-	// 	rf.ResetElectionTimeout()
-
-	// 	return
-	// }
-
-	if rf.votedFor == -1 || rf.votedFor == args.CandidateId || args.Term > rf.currentTerm {
-		fmt.Printf("Node: %d at state: %d become follower\n", rf.me, rf.state)
+	if rf.votedFor == -1 || rf.votedFor == args.CandidateId {
+		fmt.Printf("Node: %d at state: %d become follower because of receive vote requiest from: %d\n", rf.me, rf.state, args.CandidateId)
 
 		rf.currentTerm = args.Term
-		// rf.votedFor = args.CandidateId
-		rf.state = Follower
 		reply.Term = rf.currentTerm
+
+		rf.state = Follower
 
 		if (args.LastLogTerm > rf.log[len(rf.log)-1].Term) ||
 			(args.LastLogTerm == rf.log[len(rf.log)-1].Term && args.LastLogIndex >= rf.log[len(rf.log)-1].Index) {
@@ -94,44 +64,25 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			fmt.Printf("args.LastLogTerm is: %d, args.LastLogIndex: %d\n", args.LastLogTerm, args.LastLogIndex)
 			fmt.Printf("rf.log[len(rf.log)-1].Term is: %d, rf.log[len(rf.log)-1].Index: %d\n", rf.log[len(rf.log)-1].Term, rf.log[len(rf.log)-1].Index)
 
-			// rf.state = Follower
+			fmt.Printf("Term of REQUEST NODE: %d after vote: %d and node request vote's term: %d\n", rf.me, rf.currentTerm, args.Term)
 
 			rf.votedFor = args.CandidateId
-			// reply.Term = rf.currentTerm
 			reply.VoteGranted = true
 			rf.ResetElectionTimeout()
 
 			return
+		} else {
+			fmt.Printf("Node: %d at state: %d reject node: %d \n", rf.me, rf.state, args.CandidateId)
+
+			reply.VoteGranted = false
+
+			return
 		}
-
-		reply.VoteGranted = false
-
-		return
 	}
-	// 	(args.LastLogTerm > rf.log[len(rf.log)-1].Term || (args.LastLogTerm == rf.log[len(rf.log)-1].Term && args.LastLogIndex >= len(rf.log)-1)) {
-	// 	// if rf.votedFor == -1 || rf.votedFor == args.CandidateId || args.Term > rf.currentTerm {
-	// 	// Update currentTerm, votedFor and steps down to follower
-	// 	fmt.Printf("Node: %d become follower and voted for: %d\n", rf.me, args.CandidateId)
-	// 	fmt.Printf("Value of args candidate. args.term: %d, Args.LastLogIndex: %d, args.LastLogTerm: %d\n", args.Term, args.LastLogIndex, args.LastLogTerm)
-	// 	fmt.Printf("Value of voted node rf.log[len(rf.log)-1].Term: %d, and len of log len(rf.log)-1): %d\n", rf.log[len(rf.log)-1].Term, len(rf.log)-1)
-
-	// 	rf.currentTerm = args.Term
-	// 	rf.votedFor = args.CandidateId
-	// 	rf.state = Follower
-
-	// 	reply.Term = rf.currentTerm
-	// 	reply.VoteGranted = true
-	// 	rf.ResetElectionTimeout()
-
-	// 	return
-	// }
 
 	// All other cases, no vote
 	reply.VoteGranted = false
 	reply.Term = rf.currentTerm
-
-	// // Nodes still update it term
-	// rf.currentTerm = args.Term
 }
 
 // example code to send a RequestVote RPC to a server.
@@ -161,16 +112,56 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 // capitalized all field names in structs passed over RPC, and
 // that the caller passes the address of the reply struct with &, not
 // the struct itself.
-func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply, voteResult chan *RequestVoteReply) bool {
+// func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
+// 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
+// 	return ok
+// }
+
+func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, voteCount *int) {
+	reply := &RequestVoteReply{}
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
 	if !ok {
-		return ok
+		return
 	}
 
-	// fmt.Printf("Node: %d requesting vote. Who voted ok: %t\n", rf.me, reply.VoteGranted)
+	rf.cond.L.Lock()
+	defer rf.cond.L.Unlock()
 
-	voteResult <- reply
-	return ok
+	if reply.Term > args.Term {
+		rf.currentTerm = reply.Term
+		rf.state = Follower
+		rf.votedFor = -1
+		rf.ResetElectionTimeout()
+
+		return
+	}
+
+	if !reply.VoteGranted {
+		return
+	}
+
+	*voteCount++
+	if *voteCount > len(rf.peers)/2 &&
+		rf.currentTerm == args.Term &&
+		rf.state == Candidate {
+		rf.state = Leader
+		rf.votedFor = -1
+		rf.nextIndex = make([]int, len(rf.peers))
+		rf.matchIndex = make([]int, len(rf.peers))
+
+		for server := range rf.peers {
+			rf.nextIndex[server] = rf.log[len(rf.log)-1].Index + 1
+			// TODO(namnh, 3B) : Recheck this one
+			if server == rf.me {
+				rf.matchIndex[server] = rf.nextIndex[server] - 1
+				continue
+			}
+			rf.matchIndex[server] = 0
+		}
+
+		// Notify to sendHeartbeat goroutine to send heartbeat message
+		rf.cond.Broadcast()
+	}
 }
 
 // Goroutine
@@ -180,142 +171,44 @@ func (rf *Raft) StartElect() {
 
 		if time.Now().UnixMilli()-rf.lastHeartbeatTimeRecv < rf.electInterval ||
 			rf.state == Leader {
-			// if time.Now().UnixMilli()-rf.lastHeartbeatTimeRecv < rf.electInterval {
 			rf.cond.L.Unlock()
 
 			time.Sleep(time.Duration(rf.electInterval) * time.Millisecond)
 			continue
 		}
 
-		// To begin an election, follower must transit candidate
+		// To begin an election, follower must becomes candidate
 		rf.state = Candidate
-		// Candidate vote for itself
+		// Vote for itself
 		rf.votedFor = rf.me
 		// Increment its current term
 		rf.currentTerm++
 
-		// fmt.Printf("Node: %d become candidate: %d with current term: %d\n", rf.me, rf.state, rf.currentTerm)
+		fmt.Printf("Node: %d become candidate: %d with current term: %d\n", rf.me, rf.state, rf.currentTerm)
 
 		// Prepate request vote request
 		// TODO(namnh, 3B) : Modify request
 		voteReq := &RequestVoteArgs{
-			Term:        rf.currentTerm,
-			CandidateId: rf.me, // Node vote for itself to become leader
-			// LastLogIndex: len(rf.log) - 1,            // index of candidate's last log entry
+			Term:         rf.currentTerm,
+			CandidateId:  rf.me, // Node vote for itself to become leader
 			LastLogIndex: rf.log[len(rf.log)-1].Index,
 			LastLogTerm:  rf.log[len(rf.log)-1].Term, // term of candidate's last log entry
 		}
 
 		sleepInterval := rf.electInterval
-		// rf.ResetElectionTimeout()
+		voteCount := 1
 
 		rf.cond.L.Unlock()
 
-		go rf.CollectVote(voteReq)
+		for server := range rf.peers {
+			if server == rf.me {
+				continue
+			}
+
+			go rf.sendRequestVote(server, voteReq, &voteCount)
+		}
 
 		// NOTE: We MUST pause. Otherwise, multi collect vote will be sent at the same term
 		time.Sleep(time.Duration(sleepInterval) * time.Millisecond)
-	}
-}
-
-// ONLY 1 GOROUTINE CALL THIS FUNCTION
-func (rf *Raft) CollectVote(voteReq *RequestVoteArgs) {
-	// We want to use buffered channel instead of unbuffered
-	// Channel size of peers -1, because a candidate doesn't request itself
-	voteResult := make(chan *RequestVoteReply, len(rf.peers)-1)
-
-	// Vote reply
-	voteReply := &RequestVoteReply{}
-
-	voteCounts := 1
-
-	for i := 0; i < len(rf.peers); i++ {
-		if i == rf.me {
-			// Node shouldn't send request vote to itself
-			continue
-		}
-
-		go rf.sendRequestVote(i, voteReq, voteReply, voteResult)
-	}
-
-	for !rf.killed() {
-		// Need to handle 3 cases
-		// 1 : Candidate receive majority vote -> become leader
-		// 2 : Candidate doesn't receive majority
-		//     vote in election timeout -> elect at next term
-		// 3 : Candidate receives append entries (heartbeat message) from other node(for example A)
-		// if A'term >= candidate term -> candidate becomes follower and accepts A as its leader
-		// else -> candidate continues its vote process
-		select {
-		case voteReply := <-voteResult:
-			rf.cond.L.Lock()
-
-			if voteReply.Term > rf.currentTerm {
-				// If someone else replies a term > candidate's current term,
-				// candidate steps back to follower and update it current term
-				// with reply's term
-				// fmt.Printf("node: %d at state: %d become follower when voting\n", rf.me, rf.state)
-				rf.currentTerm = voteReply.Term
-				rf.state = Follower
-				rf.votedFor = -1
-				rf.ResetElectionTimeout()
-				rf.cond.L.Unlock() // Unlock acquired at line 364
-
-				return
-			}
-			rf.cond.L.Unlock() // Unlock acquired at line 364
-
-			// node reply's term < candidate's term
-			if voteReply.VoteGranted {
-				rf.cond.L.Lock()
-
-				voteCounts++
-				if voteCounts > len(rf.peers)/2 {
-					// If acandidate win majority,  becomes leader
-					rf.state = Leader
-					fmt.Printf("Don't tell me follower become leader: %d\n", rf.me)
-					rf.ResetElectionTimeout()
-					// TODO(namnh, 3B) : Reinitialized nextIndex and matchIndex
-					// Should we split it into another goroutine ?
-					rf.nextIndex = make([]int, len(rf.peers))
-					rf.matchIndex = make([]int, len(rf.peers))
-
-					for server, _ := range rf.nextIndex {
-						// Initialized to leader last log index + 1
-						rf.nextIndex[server] = rf.log[len(rf.log)-1].Index + 1
-						if server == rf.me {
-							rf.matchIndex[server] = rf.nextIndex[server] - 1
-							continue
-						}
-
-						rf.matchIndex[server] = 0
-					}
-
-					// Notify to sendheartbeats goroutine
-					// rf.cond.Signal()
-					rf.cond.Broadcast()
-					rf.cond.L.Unlock()
-					return
-				}
-
-				rf.cond.L.Unlock()
-			}
-		case <-rf.appendEntryResponses:
-			// // Candidate receive append entries node from leader
-			rf.cond.L.Lock()
-			fmt.Printf("Node: %d steps to follower\n", rf.me)
-			rf.cond.L.Unlock()
-
-			return
-		case <-rf.electionTimer.C:
-			// Out of time election. Reelect with next term
-			rf.cond.L.Lock()
-			fmt.Printf("Node: %d continue voting at next phase\n", rf.me)
-			// Reset election timeout for next round
-			rf.ResetElectionTimeout()
-			rf.cond.L.Unlock()
-
-			return
-		}
 	}
 }
