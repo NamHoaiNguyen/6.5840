@@ -272,7 +272,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// Node's beginning state = Follower
 	rf.state = Follower
 	rf.ResetElectionTimeout()
-	rf.heartbeatInterval = 125
+	rf.heartbeatInterval = 110
 
 	// AppendEntries response channel
 	rf.electionTimeout = make(chan bool)
@@ -308,7 +308,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// Leader periodically send heartbeat to other nodes
 	go rf.SendHeartbeats()
 	// Background task which update log to state machine
-	go rf.UpdateStateMachineLog()
+	go rf.UpdateStateMachineLogV2()
 	// Init retry sending message
 	// go rf.ReplicateLog()
 	for server := range rf.peers {

@@ -26,7 +26,7 @@ type RequestVoteReply struct {
 
 // NEED to acquire lock before calling
 func (rf *Raft) ResetElectionTimeout() {
-	newElectionTimeout := (350 + (rand.Int63n(151)))
+	newElectionTimeout := (350 + (rand.Int63n(201)))
 	rf.electInterval = newElectionTimeout
 }
 
@@ -168,47 +168,47 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, voteCount *in
 func (rf *Raft) StartElect() {
 	for !rf.killed() {
 		rf.cond.L.Lock()
-
-		if time.Now().UnixMilli()-rf.lastHeartbeatTimeRecv < rf.electInterval ||
-			rf.state == Leader {
-			rf.cond.L.Unlock()
-
-			time.Sleep(time.Duration(rf.electInterval) * time.Millisecond)
-			continue
-		}
-
-		// To begin an election, follower must becomes candidate
-		rf.state = Candidate
-		// Vote for itself
-		rf.votedFor = rf.me
-		// Increment its current term
-		rf.currentTerm++
-
-		fmt.Printf("Node: %d become candidate: %d with current term: %d\n", rf.me, rf.state, rf.currentTerm)
-
-		// Prepate request vote request
-		// TODO(namnh, 3B) : Modify request
-		voteReq := &RequestVoteArgs{
-			Term:         rf.currentTerm,
-			CandidateId:  rf.me, // Node vote for itself to become leader
-			LastLogIndex: rf.log[len(rf.log)-1].Index,
-			LastLogTerm:  rf.log[len(rf.log)-1].Term, // term of candidate's last log entry
-		}
-
 		sleepInterval := rf.electInterval
-		voteCount := 1
 
-		rf.cond.L.Unlock()
+		if time.Now().UnixMilli()-rf.lastHeartbeatTimeRecv >= rf.electInterval && rf.state != Leader {
+			// To begin an election, follower must becomes candidate
+			rf.state = Candidate
+			// Vote for itself
+			rf.votedFor = rf.me
+			// Increment its current term
+			rf.currentTerm++
+			rf.ResetElectionTimeout()
 
-		for server := range rf.peers {
-			if server == rf.me {
-				continue
+			fmt.Printf("Node: %d become candidate: %d with current term: %d\n", rf.me, rf.state, rf.currentTerm)
+
+			// Prepate request vote request
+			// TODO(namnh, 3B) : Modify request
+			voteReq := &RequestVoteArgs{
+				Term:         rf.currentTerm,
+				CandidateId:  rf.me, // Node vote for itself to become leader
+				LastLogIndex: rf.log[len(rf.log)-1].Index,
+				LastLogTerm:  rf.log[len(rf.log)-1].Term, // term of candidate's last log entry
 			}
 
-			go rf.sendRequestVote(server, voteReq, &voteCount)
+			// sleepInterval := rf.electInterval
+			voteCount := 1
+
+			rf.cond.L.Unlock()
+
+			for server := range rf.peers {
+				if server == rf.me {
+					continue
+				}
+
+				go rf.sendRequestVote(server, voteReq, &voteCount)
+			}
+
+			time.Sleep(time.Duration(sleepInterval) * time.Millisecond)
+			continue
 		}
+		rf.cond.L.Unlock()
 
 		// NOTE: We MUST pause. Otherwise, multi collect vote will be sent at the same term
-		time.Sleep(time.Duration(sleepInterval) * time.Millisecond)
+		time.Sleep(time.Duration(rf.heartbeatInterval) * time.Millisecond)
 	}
 }
