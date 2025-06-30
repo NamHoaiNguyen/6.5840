@@ -182,7 +182,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	// Your code here (3B).
 	rf.cond.L.Lock()
-	// defer rf.cond.L.Unlock()
+	defer rf.cond.L.Unlock()
 
 	// fmt.Printf("Node: %d receive command with state: %d\n", rf.me, rf.state)
 	// fmt.Println("Value of command that node receive", command)

@@ -161,6 +161,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, voteCount *in
 
 		// Notify to sendHeartbeat goroutine to send heartbeat message
 		rf.cond.Broadcast()
+		// rf.cond.Signal()
 	}
 }
 
