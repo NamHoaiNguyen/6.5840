@@ -60,7 +60,7 @@ func (rf *Raft) UpdateStateMachineLogV2() {
 	for !rf.killed() {
 		rf.cond.L.Lock()
 
-		for rf.lastApplied >= rf.commitIndex{
+		for rf.lastApplied >= rf.commitIndex {
 			rf.cond.Wait()
 		}
 
@@ -151,10 +151,10 @@ func (rf *Raft) SendAppendEntries() {
 
 // NOT THREAD-SAFE
 func (rf *Raft) isReplicationNeeded(server int) bool {
-
+	rf.cond.L.Lock()
+	defer rf.cond.L.Unlock()
 	isReplicationNeeded := (rf.state == Leader && rf.log[len(rf.log)-1].Index >= rf.nextIndex[server])
 	// fmt.Printf("Value of isReplicationNeeded: %t\n", isReplicationNeeded)
-
 	return isReplicationNeeded
 }
 
@@ -179,21 +179,12 @@ func (rf *Raft) isReplicationNeeded(server int) bool {
 
 func (rf *Raft) SendAppendEntriesV2(server int) {
 	for !rf.killed() {
-		rf.cond.L.Lock()
-		for rf.state != Leader {
-			rf.cond.Wait()
-		}
-		// rf.cond.L.Unlock()
-
 		rf.peerCond[server].L.Lock()
 		for !rf.isReplicationNeeded(server) {
-			rf.cond.L.Unlock()
 			rf.peerCond[server].Wait()
-			rf.cond.L.Lock()
 		}
-
 		rf.peerCond[server].L.Unlock()
-		rf.cond.L.Unlock()
+
 		rf.LeaderHandleAppendEntriesResponse(server, false /*isHeartbeat*/)
 	}
 }

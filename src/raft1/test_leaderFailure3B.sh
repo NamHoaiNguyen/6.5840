@@ -1,6 +1,6 @@
 #!/bin/bash
 
-NUM_RUNS=100
+NUM_RUNS=700
 TEST_NAME="TestLeaderFailure3B"
 
 pass_count=0

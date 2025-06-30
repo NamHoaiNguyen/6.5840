@@ -1,6 +1,6 @@
 #!/bin/bash
 
-NUM_RUNS=100
+NUM_RUNS=3000
 TEST_NAME="TestConcurrentStarts3B"
 
 pass_count=0
