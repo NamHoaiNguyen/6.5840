@@ -61,9 +61,10 @@ func (rf *Raft) UpdateStateMachineLogV2() {
 func (rf *Raft) SendHeartbeats() {
 	for !rf.killed() {
 		rf.cond.L.Lock()
+
 		for rf.state != Leader {
 			// Only leader sends heartbeat
-			rf.cond.Wait() // Unlock acquired at line 452
+			rf.cond.Wait()
 		}
 		rf.cond.L.Unlock()
 
@@ -88,7 +89,6 @@ func (rf *Raft) isReplicationNeeded(server int) bool {
 	// fmt.Printf("Value of isReplicationNeeded: %t\n", isReplicationNeeded)
 	return isReplicationNeeded
 }
-
 
 func (rf *Raft) ReplicateLog(server int) {
 	for !rf.killed() {
@@ -218,7 +218,7 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool) 
 		rf.cond.L.Unlock()
 		return
 	}
-	
+
 	// // appendEntryRes.Success == true and args
 	// if (rf.matchIndex[server] == 0) {
 	// 	rf.cond.L.Unlock()
@@ -324,7 +324,7 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool) 
 		rf.peerCond[server].Signal()
 		rf.cond.L.Unlock()
 		// rf.LeaderHandleAppendEntriesResponse(server, false /*isHearbeat*/)
-	
+
 		return
 	}
 
@@ -375,8 +375,8 @@ func (rf *Raft) AppendEntries(
 	// 	 // TODO(namnh, 3B, VERY IMPORTANT) : This condition can be the key to fix error.
 	// 	 (args.PrevLogIndex == 0 && args.PrevLogTerm == 0) {
 	if (len(rf.log) <= args.PrevLogIndex) ||
-		 (len(rf.log) > args.PrevLogIndex &&
-		      rf.log[args.PrevLogIndex].Term != args.PrevLogTerm) {
+		(len(rf.log) > args.PrevLogIndex &&
+			rf.log[args.PrevLogIndex].Term != args.PrevLogTerm) {
 		// If log doesn't contain an entry at prevLogIndex
 		// whose term matches prevLogTerm, return success = false
 		if len(rf.log) > args.PrevLogIndex && rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
@@ -488,7 +488,7 @@ func (rf *Raft) HandleAppendEntryLog(
 	// }
 
 	if args.LeaderCommit > rf.commitIndex {
-		fmt.Printf("WHEN APPLY LOG ENTRY Follower : %d receive leaderCommit: %d > its commitIndex: %d and its last index of log length: %d WHEN APPLY LOG ENTRY\n", rf.me, args.LeaderCommit, rf.commitIndex, len(rf.log) - 1)
+		fmt.Printf("WHEN APPLY LOG ENTRY Follower : %d receive leaderCommit: %d > its commitIndex: %d and its last index of log length: %d WHEN APPLY LOG ENTRY\n", rf.me, args.LeaderCommit, rf.commitIndex, len(rf.log)-1)
 		rf.commitIndex = min(args.LeaderCommit, rf.log[len(rf.log)-1].Index)
 		rf.cond.Broadcast()
 		// Because follower only need to signal instead of broadcast

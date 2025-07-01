@@ -205,7 +205,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	fmt.Printf("Leader is :%d and currentTerm: %d\n", rf.me, rf.currentTerm)
 	fmt.Println("Namnh check rf.log at leader node each PUT command: ", rf.log)
 
-
 	for server := range rf.peers {
 		if server == rf.me {
 			continue
@@ -264,7 +263,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// Node's beginning state = Follower
 	rf.state = Follower
 	rf.ResetElectionTimeout()
-	rf.heartbeatInterval = 110
+	rf.heartbeatInterval = 120
 
 	// AppendEntries response channel
 	rf.electionTimeout = make(chan bool)
