@@ -28,33 +28,6 @@ type RequestAppendEntriesReply struct {
 	Success bool //  true of follower container entry matching prevLogIndex and prevLogTerm
 }
 
-// // Goroutine
-// func (rf *Raft) UpdateStateMachineLog() {
-// 	for !rf.killed() {
-// 		rf.cond.L.Lock()
-
-// 		for rf.commitIndex > rf.lastApplied {
-// 			fmt.Printf("Namnh UpdateStateMachineLog Node: %d is :%d state\n", rf.me, rf.state)
-// 			fmt.Printf("namnh check rf.commitIndex: %d and rf.lastApplied before applied: %d!!!\n", rf.commitIndex, rf.lastApplied)
-
-// 			rf.lastApplied++
-// 			logEntry := rf.log[rf.lastApplied]
-// 			applyMsg := raftapi.ApplyMsg{
-// 				CommandValid: true,
-// 				Command:      logEntry.Command,
-// 				CommandIndex: rf.lastApplied,
-// 			}
-// 			rf.cond.L.Unlock()
-// 			rf.applyCh <- applyMsg
-// 			rf.cond.L.Lock()
-// 		}
-
-// 		rf.cond.L.Unlock()
-
-// 		time.Sleep(20 * time.Millisecond)
-// 	}
-// }
-
 // Goroutine
 func (rf *Raft) UpdateStateMachineLogV2() {
 	for !rf.killed() {
@@ -108,81 +81,25 @@ func (rf *Raft) SendHeartbeats() {
 	}
 }
 
-// TODO(namnh, 3B): Implement
-// 1 . Reinitialized nextIndex[] and matchIndex[] after relection
-
-// Goroutine
-// Should split this method with heartbeat
-// Because heartbeat should be sent periodically
-// TODO(namnh, 3B) : SendAppendEntries method needs to handle 2 cases.
-// 1 : In normal situation, leader sends log entry to server.
-// 2 : Log between leader and follower don't match, leader must resend
-// log until the point that both node agree with each other about this log.
-func (rf *Raft) SendAppendEntries() {
-	// for !rf.killed() {
-	// rf.cond.L.Lock()
-	// for rf.state != Leader {
-	// 	// Only leader can send append entries message
-	// 	rf.cond.Wait()
-	// 	// TODO(namnh, 3B) : Recheck using condition variable at here?
-	// }
-	// rf.cond.L.Unlock()
-
-	rf.cond.L.Lock()
-	if rf.state != Leader {
-		fmt.Printf("Only leader can send append entries request. You CAN'T: %d\n!!!", rf.me)
-		rf.cond.L.Unlock()
-		return
-	}
-	// rf.cond.L.Unlock()
-
-	fmt.Printf("NODE: %d TRY TO SEND APPEND ENTRY MESSAGE\n!!!", rf.me)
-	rf.cond.L.Unlock()
-
-	for i := 0; i < len(rf.peers); i++ {
-		if i == rf.me {
-			continue
-		}
-
-		go rf.LeaderHandleAppendEntriesResponse(i, false /*isHeartbeat*/)
-	}
-	// }
-}
-
-// NOT THREAD-SAFE
 func (rf *Raft) isReplicationNeeded(server int) bool {
-	rf.cond.L.Lock()
-	defer rf.cond.L.Unlock()
+	// rf.cond.L.Lock()
+	// defer rf.cond.L.Unlock()
 	isReplicationNeeded := (rf.state == Leader && rf.log[len(rf.log)-1].Index >= rf.nextIndex[server])
 	// fmt.Printf("Value of isReplicationNeeded: %t\n", isReplicationNeeded)
 	return isReplicationNeeded
 }
 
-// func (rf *Raft) ReplicateLog() {
-// 	// rf.cond.L.Lock()
 
-// 	if rf.state != Leader {
-// 		// rf.cond.L.Unlock()
-// 		return
-// 	}
-
-// 	// rf.cond.L.Unlock()
-// 	for server := range rf.peers {
-// 		if server == rf.me {
-// 			continue
-// 		}
-
-// 		rf.peerCond[server].Signal()
-// 		go rf.SendAppendEntriesV2(server)
-// 	}
-// }
-
-func (rf *Raft) SendAppendEntriesV2(server int) {
+func (rf *Raft) ReplicateLog(server int) {
 	for !rf.killed() {
 		rf.peerCond[server].L.Lock()
+		rf.cond.L.Lock()
 		for !rf.isReplicationNeeded(server) {
+			rf.cond.L.Unlock()
 			rf.peerCond[server].Wait()
+			rf.cond.L.Lock()
 		}
+		rf.cond.L.Unlock()
 		rf.peerCond[server].L.Unlock()
 
 		rf.LeaderHandleAppendEntriesResponse(server, false /*isHeartbeat*/)
@@ -235,6 +152,8 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool) 
 	}
 
 	var entriesList []LogEntry
+	// TODO(namnh, 3B, VERY VERY IMPORANT): tHIS CAN BE THE KEY
+	// if !isHeartbeat || prevLogIndex == 0 {
 	if !isHeartbeat {
 		// Only append entry message has entries log
 		entriesList = append(entriesList, rf.log[(prevLogIndex+1):]...)
@@ -293,10 +212,19 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool) 
 		// TODO(namnh, 3B) : This logic is wrong. Only send to specific node.
 		// Resend log until log between server and follower match.
 		// go rf.LeaderHandleAppendEntriesResponse(server, false /*isHearbeat*/)
+		// rf.cond.L.Unlock()
+		// rf.LeaderHandleAppendEntriesResponse(server, false /*isHearbeat*/)
+		rf.peerCond[server].Signal()
 		rf.cond.L.Unlock()
-		rf.LeaderHandleAppendEntriesResponse(server, false /*isHearbeat*/)
 		return
 	}
+	
+	// // appendEntryRes.Success == true and args
+	// if (rf.matchIndex[server] == 0) {
+	// 	rf.cond.L.Unlock()
+	// 	rf.LeaderHandleAppendEntriesResponse(server, false /*isHearbeat*/)
+	// 	return
+	// }
 
 	if rf.nextIndex[server] > len(rf.log) {
 		panic("This is an implementation error!!!")
@@ -347,6 +275,9 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool) 
 	// // Need to clear.
 	// clear(rf.collectLog)
 
+	fmt.Println("mathindex and nextinder at SERVER", rf.matchIndex, rf.nextIndex)
+	fmt.Printf("CURRENT TERM OF LEADER AFTER RECEIVING APPEND ENTRY RESPONSE: %d\n", rf.currentTerm)
+
 	N := len(rf.log) - 1
 	for N > rf.commitIndex {
 		count := 0
@@ -384,13 +315,27 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool) 
 	// }
 
 	fmt.Printf("Value of rf.commitIndex AFTER updated: %d at leader: %d\n", rf.commitIndex, rf.me)
-	rf.cond.L.Unlock()
+	// rf.cond.L.Unlock()
 	// TODO(namnh, 3B) : Signal to update state machine to flush
+
+	// TODO(namnh, 3B, VERY VERY IMPORTANT)
+	// if prevLogIndex == 0 {
+	if rf.isReplicationNeeded(server) {
+		rf.peerCond[server].Signal()
+		rf.cond.L.Unlock()
+		// rf.LeaderHandleAppendEntriesResponse(server, false /*isHearbeat*/)
+	
+		return
+	}
+
+	rf.cond.L.Unlock()
 }
 
 // RECEIVER
 // If node receives append entries(including hearbeat) message
-func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppendEntriesReply) {
+func (rf *Raft) AppendEntries(
+	args *RequestAppendEntriesArgs,
+	reply *RequestAppendEntriesReply) {
 	// If is heartbeat message
 	rf.cond.L.Lock()
 
@@ -424,8 +369,14 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppe
 
 	reply.Term = args.Term
 
-	if len(rf.log) <= args.PrevLogIndex ||
-		(len(rf.log) > args.PrevLogIndex && rf.log[args.PrevLogIndex].Term != args.PrevLogTerm) {
+	// if (len(rf.log) <= args.PrevLogIndex) ||
+	// 	 (len(rf.log) > args.PrevLogIndex &&
+	// 	      rf.log[args.PrevLogIndex].Term != args.PrevLogTerm)  ||
+	// 	 // TODO(namnh, 3B, VERY IMPORTANT) : This condition can be the key to fix error.
+	// 	 (args.PrevLogIndex == 0 && args.PrevLogTerm == 0) {
+	if (len(rf.log) <= args.PrevLogIndex) ||
+		 (len(rf.log) > args.PrevLogIndex &&
+		      rf.log[args.PrevLogIndex].Term != args.PrevLogTerm) {
 		// If log doesn't contain an entry at prevLogIndex
 		// whose term matches prevLogTerm, return success = false
 		if len(rf.log) > args.PrevLogIndex && rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
@@ -443,11 +394,6 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppe
 	// TODO(namnh, 3B) : Recheck this condition/
 	// Except 2 above conditons, success = true
 	// reply.Success = true
-
-	// if args.LeaderCommit > rf.commitIndex {
-	//  fmt.Printf("Follower : %d receive leaderCommit: %d > its commitIndex: %d and index of log \n", rf.me, args.LeaderCommit, rf.commitIndex)
-	// 	rf.commitIndex = min(args.LeaderCommit, len(rf.log)-1)
-	// }
 
 	// TODO(namnh, 3B) : Recheck this one
 	rf.state = Follower
@@ -473,9 +419,10 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppe
 			rf.commitIndex = min(args.LeaderCommit, args.PrevLogIndex)
 			// rf.commitIndex = min(args.LeaderCommit, len(rf.log)-1)
 			rf.cond.Broadcast()
-
-			fmt.Printf("Value of rf.commitIndex AFTER updated: %d at leader: %d 1!!!\n", rf.commitIndex, rf.me)
 		}
+		fmt.Printf("Follower : %d receive leaderCommit: %d > its commitIndex: %d. Its lastApplied: %d OUTSIDE IF CONDITION\n", rf.me, args.LeaderCommit, rf.commitIndex, rf.lastApplied)
+
+		fmt.Printf("Value of rf.commitIndex AFTER updated: %d at follower: %d when RECEIVING HEARTBEAT!!!\n", rf.commitIndex, rf.me)
 
 		reply.Success = true
 		rf.cond.L.Unlock()
@@ -490,7 +437,8 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs, reply *RequestAppe
 }
 
 // RECEIVER. Only respond to leader after apply entry to state machine
-func (rf *Raft) HandleAppendEntryLog(args *RequestAppendEntriesArgs,
+func (rf *Raft) HandleAppendEntryLog(
+	args *RequestAppendEntriesArgs,
 	reply *RequestAppendEntriesReply) {
 	rf.cond.L.Lock()
 	defer rf.cond.L.Unlock()
@@ -540,10 +488,14 @@ func (rf *Raft) HandleAppendEntryLog(args *RequestAppendEntriesArgs,
 	// }
 
 	if args.LeaderCommit > rf.commitIndex {
-		fmt.Printf("WHEN APPLY LOG ENTRY Follower : %d receive leaderCommit: %d > its commitIndex: %d WHEN APPLY LOG ENTRY\n", rf.me, args.LeaderCommit, rf.commitIndex)
+		fmt.Printf("WHEN APPLY LOG ENTRY Follower : %d receive leaderCommit: %d > its commitIndex: %d and its last index of log length: %d WHEN APPLY LOG ENTRY\n", rf.me, args.LeaderCommit, rf.commitIndex, len(rf.log) - 1)
 		rf.commitIndex = min(args.LeaderCommit, rf.log[len(rf.log)-1].Index)
 		rf.cond.Broadcast()
+		// Because follower only need to signal instead of broadcast
+		// rf.cond.Signal()
 	}
+
+	fmt.Printf("Value of rf.commitIndex AFTER updated: %d at follower: %d when RECEIVING APPEND LOG MESSAGE!!!\n", rf.commitIndex, rf.me)
 
 	// TODO(namnh, 3B, IMPORTANT) : CHECK THIS CAREFULLY!!!
 	// Maybe the reason is above logic wrong

@@ -9,6 +9,7 @@ package raft
 import (
 	//	"bytes"
 
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -198,18 +199,12 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		Command: command,
 	}
 	rf.log = append(rf.log, newLogEntry)
-
-	// rf.matchIndex[rf.me] = len(rf.log) - 1
-	// rf.nextIndex[rf.me] = rf.matchIndex[rf.me] + 1
-
 	rf.matchIndex[rf.me] = rf.log[len(rf.log)-1].Index
 	rf.nextIndex[rf.me] = rf.matchIndex[rf.me] + 1
 
-	// fmt.Printf("Leader is :%d and currentTerm: %d\n", rf.me, rf.currentTerm)
-	// fmt.Println("Namnh check rf.log at leader node each PUT command: ", rf.log)
+	fmt.Printf("Leader is :%d and currentTerm: %d\n", rf.me, rf.currentTerm)
+	fmt.Println("Namnh check rf.log at leader node each PUT command: ", rf.log)
 
-	// Replicate leader's log to other nodes
-	// go rf.SendAppendEntries()
 
 	for server := range rf.peers {
 		if server == rf.me {
@@ -220,9 +215,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		rf.peerCond[server].Signal()
 		// rf.peerCond[server].L.Unlock()
 	}
-
-	// go rf.ReplicateLog()
-	// rf.ReplicateLog()
 
 	return rf.log[len(rf.log)-1].Index, int(rf.currentTerm), (rf.state == Leader)
 }
@@ -316,7 +308,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			continue
 		}
 
-		go rf.SendAppendEntriesV2(server)
+		go rf.ReplicateLog(server)
 	}
 
 	return rf
