@@ -39,42 +39,30 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	if rf.currentTerm > args.Term {
 		reply.VoteGranted = false
 		reply.Term = rf.currentTerm
-
 		return
 	}
 
+	// If someone else comes with a HIGHER term, update
+	// node 's currentTerm to vote.
 	if args.Term > rf.currentTerm {
 		rf.currentTerm = args.Term
 		rf.votedFor = -1
 	}
 
-	fmt.Printf("rf.votedFor value: %d and args.CandidateId: %d\n", rf.votedFor, args.CandidateId)
-
 	if rf.votedFor == -1 || rf.votedFor == args.CandidateId {
-		fmt.Printf("Node: %d at state: %d become follower because of receive vote requiest from: %d\n", rf.me, rf.state, args.CandidateId)
-
 		rf.currentTerm = args.Term
 		reply.Term = rf.currentTerm
 
+		// Becomes in follower.
 		rf.state = Follower
 
 		if (args.LastLogTerm > rf.log[len(rf.log)-1].Term) ||
-			(args.LastLogTerm == rf.log[len(rf.log)-1].Term && args.LastLogIndex >= rf.log[len(rf.log)-1].Index) {
-			fmt.Printf("Node: %d at state: %d become follower and voted for node: %d \n", rf.me, rf.state, args.CandidateId)
-			fmt.Printf("args.LastLogTerm is: %d, args.LastLogIndex: %d\n", args.LastLogTerm, args.LastLogIndex)
-			fmt.Printf("rf.log[len(rf.log)-1].Term is: %d, rf.log[len(rf.log)-1].Index: %d\n", rf.log[len(rf.log)-1].Term, rf.log[len(rf.log)-1].Index)
-
-			fmt.Printf("Term of REQUEST NODE: %d after vote: %d and node request vote's term: %d\n", rf.me, rf.currentTerm, args.Term)
-
+			(args.LastLogTerm == rf.log[len(rf.log)-1].Term &&
+				args.LastLogIndex >= rf.log[len(rf.log)-1].Index) {
+			// If candidates's log is up-to-date, vote for it.
 			rf.votedFor = args.CandidateId
 			reply.VoteGranted = true
 			rf.ResetElectionTimeout()
-
-			return
-		} else {
-			fmt.Printf("Node: %d at state: %d reject node: %d \n", rf.me, rf.state, args.CandidateId)
-
-			reply.VoteGranted = false
 
 			return
 		}
@@ -112,11 +100,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 // capitalized all field names in structs passed over RPC, and
 // that the caller passes the address of the reply struct with &, not
 // the struct itself.
-// func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
-// 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
-// 	return ok
-// }
-
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, voteCount *int) {
 	reply := &RequestVoteReply{}
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
@@ -151,7 +134,6 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, voteCount *in
 
 		for server := range rf.peers {
 			rf.nextIndex[server] = rf.log[len(rf.log)-1].Index + 1
-			// TODO(namnh, 3B) : Recheck this one
 			if server == rf.me {
 				rf.matchIndex[server] = rf.nextIndex[server] - 1
 				continue
@@ -161,7 +143,6 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, voteCount *in
 
 		// Notify to sendHeartbeat goroutine to send heartbeat message
 		rf.cond.Broadcast()
-		// rf.cond.Signal()
 	}
 }
 
@@ -183,7 +164,6 @@ func (rf *Raft) StartElect() {
 			fmt.Printf("Node: %d become candidate: %d with current term: %d\n", rf.me, rf.state, rf.currentTerm)
 
 			// Prepate request vote request
-			// TODO(namnh, 3B) : Modify request
 			voteReq := &RequestVoteArgs{
 				Term:         rf.currentTerm,
 				CandidateId:  rf.me, // Node vote for itself to become leader
@@ -191,9 +171,7 @@ func (rf *Raft) StartElect() {
 				LastLogTerm:  rf.log[len(rf.log)-1].Term, // term of candidate's last log entry
 			}
 
-			// sleepInterval := rf.electInterval
 			voteCount := 1
-
 			rf.cond.L.Unlock()
 
 			for server := range rf.peers {
