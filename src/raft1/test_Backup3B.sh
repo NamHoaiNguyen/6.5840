@@ -1,6 +1,6 @@
 #!/bin/bash
 
-NUM_RUNS=200
+NUM_RUNS=250
 TEST_NAME="TestBackup3B"
 
 pass_count=0

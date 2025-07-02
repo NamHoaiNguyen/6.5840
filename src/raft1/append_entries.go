@@ -278,7 +278,7 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool) 
 	fmt.Println("mathindex and nextinder at SERVER", rf.matchIndex, rf.nextIndex)
 	fmt.Printf("CURRENT TERM OF LEADER AFTER RECEIVING APPEND ENTRY RESPONSE: %d\n", rf.currentTerm)
 
-	N := len(rf.log) - 1
+	N := rf.log[len(rf.log)-1].Index
 	for N > rf.commitIndex {
 		count := 0
 		for i := 0; i < len(rf.peers); i++ {

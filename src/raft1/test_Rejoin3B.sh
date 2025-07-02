@@ -1,6 +1,6 @@
 #!/bin/bash
 
-NUM_RUNS=600
+NUM_RUNS=700
 TEST_NAME="TestRejoin3B"
 
 pass_count=0
