@@ -1,6 +1,6 @@
 #!/bin/bash
 
-NUM_RUNS=1500
+NUM_RUNS=2000
 TEST_NAME="TestRPCBytes3B"
 
 pass_count=0

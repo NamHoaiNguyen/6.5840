@@ -1,7 +1,6 @@
 package raft
 
 import (
-	"fmt"
 	"time"
 
 	"6.5840/raftapi"
@@ -65,13 +64,13 @@ func (rf *Raft) SendHeartbeats() {
 		}
 		rf.cond.L.Unlock()
 
-		for i := 0; i < len(rf.peers); i++ {
-			if i == rf.me {
+		for server := range rf.peers {
+			if server == rf.me {
 				continue
 			}
 
 			// Leader doesn't be blocking to receive response from followers
-			go rf.LeaderHandleAppendEntriesResponse(i, true /*isHearbeat*/) // heartbeat message doesn't need to retry
+			go rf.SendAppendEntries(server, true /*isHearbeat*/)
 		}
 
 		// Sleep for heartbeatInterval(ms)
@@ -80,8 +79,7 @@ func (rf *Raft) SendHeartbeats() {
 }
 
 func (rf *Raft) isReplicationNeeded(server int) bool {
-	isReplicationNeeded := (rf.state == Leader && rf.log[len(rf.log)-1].Index >= rf.nextIndex[server])
-	return isReplicationNeeded
+	return (rf.state == Leader && rf.log[len(rf.log)-1].Index >= rf.nextIndex[server])
 }
 
 func (rf *Raft) ReplicateLog(server int) {
@@ -96,12 +94,12 @@ func (rf *Raft) ReplicateLog(server int) {
 		rf.cond.L.Unlock()
 		rf.peerCond[server].L.Unlock()
 
-		rf.LeaderHandleAppendEntriesResponse(server, false /*isHeartbeat*/)
+		rf.SendAppendEntries(server, false /*isHeartbeat*/)
 	}
 }
 
 // Leader execute append entry requests and handle response
-func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool) {
+func (rf *Raft) SendAppendEntries(server int, isHeartbeat bool) {
 	rf.cond.L.Lock()
 	if rf.state != Leader {
 		// There is a case that before a leader sending append entry request to other node,
@@ -149,7 +147,7 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool) 
 	}
 
 	rf.cond.L.Lock()
-	// defer rf.cond.L.Unlock()
+	defer rf.cond.L.Unlock()
 
 	if appendEntryRes.Term > rf.currentTerm {
 		// Leader MUST step down if follower's term > leader's term
@@ -157,14 +155,12 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool) 
 		// Reupdate leader's term
 		rf.currentTerm = appendEntryRes.Term
 		rf.votedFor = -1
-		rf.cond.L.Unlock()
 		return
 	}
 
 	if appendEntryRes.Term != rf.currentTerm || rf.state != Leader {
 		// If leader isn't leader anymore
 		// or leader's term isn't the same as before
-		rf.cond.L.Unlock()
 		return
 	}
 
@@ -174,7 +170,6 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool) 
 		// Leader decrease its nextIndex corressponding with follower.
 		rf.nextIndex[server]--
 		rf.peerCond[server].Signal()
-		rf.cond.L.Unlock()
 		return
 	}
 
@@ -203,16 +198,16 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool) 
 
 		N -= 1
 	}
+	// Reupdate leader's commitIndex if majority of node commit up to N-th index
 	rf.commitIndex = N
+
+	// Update state machine log
 	rf.cond.Broadcast()
 
 	if rf.isReplicationNeeded(server) {
 		rf.peerCond[server].Signal()
-		rf.cond.L.Unlock()
 		return
 	}
-
-	rf.cond.L.Unlock()
 }
 
 // RECEIVER
@@ -220,13 +215,11 @@ func (rf *Raft) LeaderHandleAppendEntriesResponse(server int, isHeartbeat bool) 
 func (rf *Raft) AppendEntries(
 	args *RequestAppendEntriesArgs,
 	reply *RequestAppendEntriesReply) {
-	// If is heartbeat message
 	rf.cond.L.Lock()
 
 	if args.Term < rf.currentTerm {
 		// if request's term < node's current term. Return false
 		// (and node who sent request must be steps down to follower)
-		fmt.Printf("Term condition less than is hit!!! args.Term: %d and rf.currentTerm: %d\n", args.Term, rf.currentTerm)
 		reply.Success = false
 		reply.Term = rf.currentTerm
 
@@ -265,6 +258,8 @@ func (rf *Raft) AppendEntries(
 		return
 	}
 
+	// MUST unlock first before calling HandleAppendEntryLog.
+	// Otherwise deadlock happens.
 	rf.cond.L.Unlock()
 	// Use goroutine can cause logic error.
 	rf.HandleAppendEntryLog(args, reply)
@@ -299,11 +294,10 @@ func (rf *Raft) HandleAppendEntryLog(
 		}
 	}
 
-	listEntries := args.Entries
-	rf.log = append(rf.log, listEntries[numEntries:]...)
+	// listEntries := args.Entries
+	rf.log = append(rf.log, args.Entries[numEntries:]...)
 
 	if args.LeaderCommit > rf.commitIndex {
-		fmt.Printf("WHEN APPLY LOG ENTRY Follower : %d receive leaderCommit: %d > its commitIndex: %d and its last index of log length: %d WHEN APPLY LOG ENTRY\n", rf.me, args.LeaderCommit, rf.commitIndex, len(rf.log)-1)
 		rf.commitIndex = min(args.LeaderCommit, rf.log[len(rf.log)-1].Index)
 		rf.cond.Broadcast()
 	}

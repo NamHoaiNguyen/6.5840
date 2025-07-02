@@ -1,7 +1,6 @@
 package raft
 
 import (
-	"fmt"
 	"math/rand"
 	"time"
 )
@@ -152,7 +151,7 @@ func (rf *Raft) StartElect() {
 		rf.cond.L.Lock()
 		sleepInterval := rf.electInterval
 
-		if time.Now().UnixMilli()-rf.lastHeartbeatTimeRecv >= rf.electInterval && rf.state != Leader {
+		if time.Now().UnixMilli()-rf.lastHeartbeatTimeRecv >= sleepInterval && rf.state != Leader {
 			// To begin an election, follower must becomes candidate
 			rf.state = Candidate
 			// Vote for itself
@@ -160,8 +159,6 @@ func (rf *Raft) StartElect() {
 			// Increment its current term
 			rf.currentTerm++
 			rf.ResetElectionTimeout()
-
-			fmt.Printf("Node: %d become candidate: %d with current term: %d\n", rf.me, rf.state, rf.currentTerm)
 
 			// Prepate request vote request
 			voteReq := &RequestVoteArgs{
