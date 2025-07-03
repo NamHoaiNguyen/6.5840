@@ -242,7 +242,6 @@ func (ts *Test) one(cmd any, expectedServers int, retry bool) int {
 				rf = ts.srvs[starts].raft
 				ts.srvs[starts].mu.Unlock()
 			}
-
 			if rf != nil {
 				index1, _, ok := rf.Start(cmd)
 				if ok {
@@ -279,7 +278,6 @@ func (ts *Test) one(cmd any, expectedServers int, retry bool) int {
 		}
 	}
 	if ts.checkFinished() == false {
-		fmt.Println("namnh check that ts.checkFinished() = false")
 		desp := fmt.Sprintf("agreement of %.8s failed", textcmd)
 		tester.AnnotateCheckerFailure(desp, "failed after 10-second timeout")
 		ts.Fatalf("one(%v) failed to reach agreement", cmd)

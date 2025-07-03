@@ -7,7 +7,6 @@ import (
 )
 
 type LogEntry struct {
-	// TODO(namnh, 3B) : Recheck the precision of index field ?
 	Index   int // index of log
 	Term    int // term when entry was received by leader
 	Command any // command for state machine
