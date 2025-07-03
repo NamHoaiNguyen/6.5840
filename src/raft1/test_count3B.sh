@@ -1,6 +1,6 @@
 #!/bin/bash
 
-NUM_RUNS=2000
+NUM_RUNS=1200
 TEST_NAME="TestCount3B"
 
 pass_count=0

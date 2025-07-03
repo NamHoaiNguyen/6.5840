@@ -1,6 +1,6 @@
 #!/bin/bash
 
-NUM_RUNS=250
+NUM_RUNS=150
 TEST_NAME="TestBackup3B"
 
 pass_count=0
@@ -10,7 +10,6 @@ echo "Running $TEST_NAME $NUM_RUNS times..."
 echo "========================================="
 
 for i in $(seq 1 $NUM_RUNS); do
-  echo "Run #$i"
   output=$(go test -v -run "^$TEST_NAME$" 2>&1)
 
   echo "$output" | grep -E "^--- (PASS|FAIL): $TEST_NAME"

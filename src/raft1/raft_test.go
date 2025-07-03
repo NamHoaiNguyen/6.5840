@@ -599,8 +599,6 @@ func TestBackup3B(t *testing.T) {
 	ts.g.ConnectOne(other)
 	tester.AnnotateConnection(ts.g.GetConnected())
 
-	fmt.Println("NAMNH I THINK IT IS THE LAST VOTING")
-
 	// lots of successful commands to new group.
 	for i := 0; i < 50; i++ {
 		ts.one(rand.Int(), 3, true)

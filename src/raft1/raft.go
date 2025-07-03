@@ -9,7 +9,6 @@ package raft
 import (
 	//	"bytes"
 
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -72,25 +71,6 @@ type Raft struct {
 
 	// Specific for Lab
 	applyCh chan raftapi.ApplyMsg
-
-	// Start of data not used in raft algorithm, but for easier to implement
-	// Use to fast find a majority of matchIndex log to update commitIndex
-	// Key is index of log, value is number of nodes that commited that index
-	// During elecction, if candidate's receive appendentry message from other node
-	// if this entry is valid, candidate stops election and becomes follower
-	// appendEntryResponses chan bool
-
-	// Channel to notify that a new election round should be started if no leader
-	// is elected in previous term
-	electionTimeout chan bool
-
-	// Retry channel. Use to resend ONLY append entry message to follower nodes
-	retryCh chan int
-
-	// Done channekl. To stop goroutine
-	done chan struct{}
-
-	collectLog map[int]int
 
 	cond *sync.Cond
 
@@ -185,9 +165,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.cond.L.Lock()
 	defer rf.cond.L.Unlock()
 
-	// fmt.Printf("Node: %d receive command with state: %d\n", rf.me, rf.state)
-	// fmt.Println("Value of command that node receive", command)
-
 	if rf.state != Leader {
 		return -1, -1, false
 	}
@@ -202,17 +179,11 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.matchIndex[rf.me] = rf.log[len(rf.log)-1].Index
 	rf.nextIndex[rf.me] = rf.matchIndex[rf.me] + 1
 
-	fmt.Printf("Leader is :%d and currentTerm: %d\n", rf.me, rf.currentTerm)
-	fmt.Println("Namnh check rf.log at leader node each PUT command: ", rf.log)
-
 	for server := range rf.peers {
 		if server == rf.me {
 			continue
 		}
-
-		// rf.peerCond[server].L.Lock()
 		rf.peerCond[server].Signal()
-		// rf.peerCond[server].L.Unlock()
 	}
 
 	return rf.log[len(rf.log)-1].Index, int(rf.currentTerm), (rf.state == Leader)
@@ -265,21 +236,13 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.ResetElectionTimeout()
 	rf.heartbeatInterval = 120
 
-	// AppendEntries response channel
-	rf.electionTimeout = make(chan bool)
-
-	// TODO(namnh, 3B) : Start init data
 	rf.log = []LogEntry{
 		{Index: 0, Term: 0, Command: nil},
 	}
-	rf.collectLog = make(map[int]int)
 
 	// Volatile state on all servers
 	rf.commitIndex = 0
 	rf.lastApplied = 0
-
-	// Create retry channel
-	rf.retryCh = make(chan int)
 
 	// Assing applyMsg chan
 	rf.applyCh = applyCh

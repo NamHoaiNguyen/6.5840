@@ -78,6 +78,7 @@ func (rf *Raft) SendHeartbeats() {
 	}
 }
 
+// NOT THREAD-SAFE
 func (rf *Raft) isReplicationNeeded(server int) bool {
 	return (rf.state == Leader && rf.log[len(rf.log)-1].Index >= rf.nextIndex[server])
 }
@@ -107,12 +108,6 @@ func (rf *Raft) SendAppendEntries(server int, isHeartbeat bool) {
 		rf.cond.L.Unlock()
 		return
 	}
-
-	// if len(rf.log)-1 < rf.nextIndex[server] && !isHeartbeat {
-	// 	fmt.Println("Shouldn't send append entry message anymore!!!")
-	// 	rf.cond.L.Unlock()
-	// 	return
-	// }
 
 	if rf.nextIndex[server] < 1 {
 		panic("nextIndex of a server MUST >= 1")
@@ -155,6 +150,8 @@ func (rf *Raft) SendAppendEntries(server int, isHeartbeat bool) {
 		// Reupdate leader's term
 		rf.currentTerm = appendEntryRes.Term
 		rf.votedFor = -1
+		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
+		rf.ResetElectionTimeout()
 		return
 	}
 
@@ -204,6 +201,9 @@ func (rf *Raft) SendAppendEntries(server int, isHeartbeat bool) {
 	// Update state machine log
 	rf.cond.Broadcast()
 
+	// Leader MUST check to send log to follower's node or not. In case a node
+	// joins into cluster and just receives heartbeat message, forget this can
+	// make this nodes' log is inconsistency with leader's log.
 	if rf.isReplicationNeeded(server) {
 		rf.peerCond[server].Signal()
 		return
@@ -212,18 +212,16 @@ func (rf *Raft) SendAppendEntries(server int, isHeartbeat bool) {
 
 // RECEIVER
 // If node receives append entries(including hearbeat) message
-func (rf *Raft) AppendEntries(
-	args *RequestAppendEntriesArgs,
+func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs,
 	reply *RequestAppendEntriesReply) {
 	rf.cond.L.Lock()
+	defer rf.cond.L.Unlock()
 
 	if args.Term < rf.currentTerm {
 		// if request's term < node's current term. Return false
 		// (and node who sent request must be steps down to follower)
 		reply.Success = false
 		reply.Term = rf.currentTerm
-
-		rf.cond.L.Unlock()
 		return
 	}
 
@@ -235,7 +233,6 @@ func (rf *Raft) AppendEntries(
 		// If log doesn't contain an entry at prevLogIndex
 		// whose term matches prevLogTerm, return success = false
 		reply.Success = false
-		rf.cond.L.Unlock()
 		return
 	}
 
@@ -248,34 +245,29 @@ func (rf *Raft) AppendEntries(
 	if args.Entries == nil {
 		// Reupdate last time receive heartbeat message
 		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
+		rf.ResetElectionTimeout()
+
 		if args.LeaderCommit > rf.commitIndex {
+			// MUST update follower's commitIndex upto prevLogIndex-th index.
 			rf.commitIndex = min(args.LeaderCommit, args.PrevLogIndex)
+			// Update follower's state machine log
 			rf.cond.Broadcast()
 		}
 
 		reply.Success = true
-		rf.cond.L.Unlock()
 		return
 	}
 
-	// MUST unlock first before calling HandleAppendEntryLog.
-	// Otherwise deadlock happens.
-	rf.cond.L.Unlock()
-	// Use goroutine can cause logic error.
 	rf.HandleAppendEntryLog(args, reply)
 }
 
 // RECEIVER. Only respond to leader after apply entry to state machine
+// NOT THREAD-SAFE
 func (rf *Raft) HandleAppendEntryLog(
 	args *RequestAppendEntriesArgs,
 	reply *RequestAppendEntriesReply) {
-	rf.cond.L.Lock()
-	defer rf.cond.L.Unlock()
-
 	numEntries := 0
 	for _, entry := range args.Entries {
-		// If an existing entry conflicts with a new one(same index but different terms)
-		// delete the existing entry and all that follow it
 		logEntryIndex := entry.Index
 		logEntryTerm := entry.Term
 
@@ -294,7 +286,6 @@ func (rf *Raft) HandleAppendEntryLog(
 		}
 	}
 
-	// listEntries := args.Entries
 	rf.log = append(rf.log, args.Entries[numEntries:]...)
 
 	if args.LeaderCommit > rf.commitIndex {

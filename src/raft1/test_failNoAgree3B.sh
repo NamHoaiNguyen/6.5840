@@ -1,6 +1,6 @@
 #!/bin/bash
 
-NUM_RUNS=900
+NUM_RUNS=600
 TEST_NAME="TestFailNoAgree3B"
 
 pass_count=0

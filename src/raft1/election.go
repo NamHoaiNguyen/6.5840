@@ -46,25 +46,27 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	if args.Term > rf.currentTerm {
 		rf.currentTerm = args.Term
 		rf.votedFor = -1
+		rf.state = Follower
+		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
+		rf.ResetElectionTimeout()
 	}
 
-	if rf.votedFor == -1 || rf.votedFor == args.CandidateId {
-		rf.currentTerm = args.Term
-		reply.Term = rf.currentTerm
+	reply.Term = rf.currentTerm
 
-		// Becomes in follower.
+	if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) &&
+		(args.LastLogTerm > rf.log[len(rf.log)-1].Term) ||
+		(args.LastLogTerm == rf.log[len(rf.log)-1].Term &&
+			args.LastLogIndex >= rf.log[len(rf.log)-1].Index) {
+		// If candidates's log is up-to-date, vote for it.
 		rf.state = Follower
+		// Node MUST steps down if vote
+		rf.votedFor = args.CandidateId
+		// To avoid a node after voting quickly start election
+		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
+		rf.ResetElectionTimeout()
 
-		if (args.LastLogTerm > rf.log[len(rf.log)-1].Term) ||
-			(args.LastLogTerm == rf.log[len(rf.log)-1].Term &&
-				args.LastLogIndex >= rf.log[len(rf.log)-1].Index) {
-			// If candidates's log is up-to-date, vote for it.
-			rf.votedFor = args.CandidateId
-			reply.VoteGranted = true
-			rf.ResetElectionTimeout()
-
-			return
-		}
+		reply.VoteGranted = true
+		return
 	}
 
 	// All other cases, no vote
@@ -113,6 +115,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, voteCount *in
 		rf.currentTerm = reply.Term
 		rf.state = Follower
 		rf.votedFor = -1
+		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
 		rf.ResetElectionTimeout()
 
 		return
@@ -149,15 +152,14 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, voteCount *in
 func (rf *Raft) StartElect() {
 	for !rf.killed() {
 		rf.cond.L.Lock()
-		sleepInterval := rf.electInterval
-
-		if time.Now().UnixMilli()-rf.lastHeartbeatTimeRecv >= sleepInterval && rf.state != Leader {
+		if time.Now().UnixMilli()-rf.lastHeartbeatTimeRecv >= rf.electInterval && rf.state != Leader {
 			// To begin an election, follower must becomes candidate
 			rf.state = Candidate
 			// Vote for itself
 			rf.votedFor = rf.me
 			// Increment its current term
 			rf.currentTerm++
+			rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
 			rf.ResetElectionTimeout()
 
 			// Prepate request vote request
@@ -167,9 +169,7 @@ func (rf *Raft) StartElect() {
 				LastLogIndex: rf.log[len(rf.log)-1].Index,
 				LastLogTerm:  rf.log[len(rf.log)-1].Term, // term of candidate's last log entry
 			}
-
 			voteCount := 1
-			rf.cond.L.Unlock()
 
 			for server := range rf.peers {
 				if server == rf.me {
@@ -178,13 +178,9 @@ func (rf *Raft) StartElect() {
 
 				go rf.sendRequestVote(server, voteReq, &voteCount)
 			}
-
-			time.Sleep(time.Duration(sleepInterval) * time.Millisecond)
-			continue
 		}
 		rf.cond.L.Unlock()
 
-		// NOTE: We MUST pause. Otherwise, multi collect vote will be sent at the same term
-		time.Sleep(time.Duration(rf.heartbeatInterval) * time.Millisecond)
+		time.Sleep(time.Duration(20) * time.Millisecond)
 	}
 }
