@@ -71,7 +71,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	// All other cases, no vote
 	reply.VoteGranted = false
-	reply.Term = rf.currentTerm
 }
 
 // example code to send a RequestVote RPC to a server.
@@ -181,6 +180,6 @@ func (rf *Raft) StartElect() {
 		}
 		rf.cond.L.Unlock()
 
-		time.Sleep(time.Duration(20) * time.Millisecond)
+		time.Sleep(time.Duration(10) * time.Millisecond)
 	}
 }
