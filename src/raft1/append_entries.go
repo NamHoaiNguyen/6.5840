@@ -137,9 +137,9 @@ func (rf *Raft) SendAppendEntries(server int, isHeartbeat bool) {
 
 	ok := rf.peers[server].Call("Raft.AppendEntries", appendEntryReq, appendEntryRes)
 	if !ok {
-		if (!isHeartbeat) {
-			rf.SendAppendEntries(server, isHeartbeat)
-		}
+		// if (!isHeartbeat) {
+		// 	rf.SendAppendEntries(server, isHeartbeat)
+		// }
 		return
 	}
 
