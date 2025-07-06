@@ -25,7 +25,7 @@ type RequestVoteReply struct {
 
 // NEED to acquire lock before calling
 func (rf *Raft) ResetElectionTimeout() {
-	newElectionTimeout := (350 + (rand.Int63n(201)))
+	newElectionTimeout := 350 + (rand.Int63() % 200)
 	rf.electInterval = newElectionTimeout
 }
 
@@ -34,9 +34,10 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (3A, 3B).
 	rf.cond.L.Lock()
 	defer rf.cond.L.Unlock()
+	defer rf.persist()
 
+	reply.VoteGranted = false
 	if rf.currentTerm > args.Term {
-		reply.VoteGranted = false
 		reply.Term = rf.currentTerm
 		return
 	}
@@ -54,9 +55,9 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	reply.Term = rf.currentTerm
 
 	if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) &&
-		(args.LastLogTerm > rf.log[len(rf.log)-1].Term) ||
-		(args.LastLogTerm == rf.log[len(rf.log)-1].Term &&
-			args.LastLogIndex >= rf.log[len(rf.log)-1].Index) {
+		((args.LastLogTerm > rf.log[len(rf.log)-1].Term) ||
+			(args.LastLogTerm == rf.log[len(rf.log)-1].Term &&
+				args.LastLogIndex >= rf.log[len(rf.log)-1].Index)) {
 		// If candidates's log is up-to-date, vote for it.
 		rf.state = Follower
 		// Node MUST steps down if vote
@@ -68,9 +69,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		reply.VoteGranted = true
 		return
 	}
-
-	// All other cases, no vote
-	reply.VoteGranted = false
 }
 
 // example code to send a RequestVote RPC to a server.
@@ -109,6 +107,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, voteCount *in
 
 	rf.cond.L.Lock()
 	defer rf.cond.L.Unlock()
+	defer rf.persist()
 
 	if reply.Term > args.Term {
 		rf.currentTerm = reply.Term
@@ -149,6 +148,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, voteCount *in
 
 // Goroutine
 func (rf *Raft) StartElect() {
+	// var electInterval int64
 	for !rf.killed() {
 		rf.cond.L.Lock()
 		if time.Now().UnixMilli()-rf.lastHeartbeatTimeRecv >= rf.electInterval && rf.state != Leader {
@@ -158,8 +158,12 @@ func (rf *Raft) StartElect() {
 			rf.votedFor = rf.me
 			// Increment its current term
 			rf.currentTerm++
+
+			// electInterval = rf.electInterval
 			rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
 			rf.ResetElectionTimeout()
+
+			rf.persist()
 
 			// Prepate request vote request
 			voteReq := &RequestVoteArgs{
