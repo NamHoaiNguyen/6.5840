@@ -136,6 +136,7 @@ func (rf *Raft) readPersist(data []byte) {
 		// rf.commitIndex = rf.log[0].Index
 		rf.lastApplied = 0
 		rf.commitIndex = 0
+		rf.state = Follower
 	}
 }
 

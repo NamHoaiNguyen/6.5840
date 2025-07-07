@@ -104,7 +104,6 @@ func (rf *Raft) ReplicateLog(server int) {
 
 // Leader execute append entry requests and handle response
 func (rf *Raft) SendAppendEntries(server int, isHeartbeat bool) {
-	// fmt.Printf("SendAppendEntries is called by heartbeat flow: %t\n", isHeartbeat)
 	rf.cond.L.Lock()
 	if rf.state != Leader {
 		// There is a case that before a leader sending append entry request to other node,
@@ -152,8 +151,6 @@ func (rf *Raft) SendAppendEntries(server int, isHeartbeat bool) {
 		rf.votedFor = -1
 		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
 		rf.ResetElectionTimeout()
-		fmt.Printf("Value of newElectionTimeout: %d FROM LEADER to follower AFTER sending append entry message\n", rf.electInterval)
-
 		return
 	}
 
@@ -170,7 +167,6 @@ func (rf *Raft) SendAppendEntries(server int, isHeartbeat bool) {
 		// Optimization
 		if appendEntryRes.XLen != -1 {
 			// follower's log is too short
-			fmt.Println("follower's log is too short")
 			rf.nextIndex[server] = appendEntryRes.XLen
 		} else {
 			for i := appendEntryReq.PrevLogIndex - 1; i >= 0; i-- {
@@ -266,11 +262,12 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs,
 	// Now args's term >= node's currentTerm
 	rf.currentTerm = args.Term
 	rf.state = Follower
+	// Reupdate last time receive heartbeat message
+	rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
 
 	// If log doesn't contain an entry at prevLogIndex
 	// whose term matches prevLogTerm, return success = false
 	if args.PrevLogIndex >= len(rf.log) {
-		fmt.Println("PrevlogIndex from leader > log length of follower node")
 		reply.XLen = len(rf.log) - 1
 		return
 	}
@@ -284,7 +281,6 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs,
 		for i := 0; i <= args.PrevLogIndex; i++ {
 			if rf.log[i].Term == conflictTerm {
 				reply.XIndex = i
-				fmt.Printf("XIndex = : %d\n", i)
 				return
 			}
 		}
@@ -292,13 +288,9 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs,
 
 	// Heartbeat message
 	if len(args.Entries) == 0 {
-		fmt.Printf("Node: %d receive heartbeat message from leader!!!\n", rf.me)
-		// Reupdate last time receive heartbeat message
-		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
-
 		if args.LeaderCommit > rf.commitIndex {
 			// MUST update follower's commitIndex upto prevLogIndex-th index.
-			rf.commitIndex = min(args.LeaderCommit, args.PrevLogIndex)
+			rf.commitIndex = min(args.LeaderCommit, rf.log[args.PrevLogIndex].Index)
 			// Update follower's state machine log
 		}
 		rf.cond.Broadcast()

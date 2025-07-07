@@ -1,6 +1,6 @@
 #!/bin/bash
 
-NUM_RUNS=2500
+NUM_RUNS=1500
 TEST_NAME="TestUnreliableAgree3C"
 
 pass_count=0

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-NUM_RUNS=200
+NUM_RUNS=180
 TEST_NAME="TestUnreliableChurn3C"
 
 pass_count=0

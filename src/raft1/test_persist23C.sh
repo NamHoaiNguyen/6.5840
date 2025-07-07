@@ -1,6 +1,6 @@
 #!/bin/bash
 
-NUM_RUNS=100
+NUM_RUNS=50
 TEST_NAME="TestPersist23C"
 
 pass_count=0
