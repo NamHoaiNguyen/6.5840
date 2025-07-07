@@ -1,7 +1,9 @@
 package raft
 
 import (
+	"fmt"
 	"math/rand"
+	"sync/atomic"
 	"time"
 )
 
@@ -50,6 +52,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.state = Follower
 		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
 		rf.ResetElectionTimeout()
+		fmt.Printf("Value of newElectionTimeout: %d after become follower when receiving term > current term in request vote\n", rf.electInterval)
 	}
 
 	reply.Term = rf.currentTerm
@@ -65,6 +68,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		// To avoid a node after voting quickly start election
 		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
 		rf.ResetElectionTimeout()
+		fmt.Printf("Value of newElectionTimeout: %d after VOTE FOR SOME ONE NODE\n", rf.electInterval)
 
 		reply.VoteGranted = true
 		return
@@ -98,7 +102,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 // capitalized all field names in structs passed over RPC, and
 // that the caller passes the address of the reply struct with &, not
 // the struct itself.
-func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, voteCount *int) {
+func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, voteCount *int32) {
 	reply := &RequestVoteReply{}
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
 	if !ok {
@@ -115,7 +119,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, voteCount *in
 		rf.votedFor = -1
 		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
 		rf.ResetElectionTimeout()
-
+		fmt.Printf("Value of newElectionTimeout: %d after from CANDIDATE TO FOLLOWER\n", rf.electInterval)
 		return
 	}
 
@@ -123,14 +127,13 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, voteCount *in
 		return
 	}
 
-	*voteCount++
-	if *voteCount > len(rf.peers)/2 &&
+	if atomic.AddInt32(voteCount, 1) > int32(len(rf.peers)/2) &&
 		rf.currentTerm == args.Term &&
 		rf.state == Candidate {
 		rf.state = Leader
 		rf.votedFor = -1
-		rf.nextIndex = make([]int, len(rf.peers))
-		rf.matchIndex = make([]int, len(rf.peers))
+
+		fmt.Printf("Node: %d become leader!!!\n", rf.me)
 
 		for server := range rf.peers {
 			rf.nextIndex[server] = rf.log[len(rf.log)-1].Index + 1
@@ -141,7 +144,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, voteCount *in
 			rf.matchIndex[server] = 0
 		}
 
-		// Notify to sendHeartbeat goroutine to send heartbeat message
+		// Notify to sendHeartbeat and update state machine
 		rf.cond.Broadcast()
 	}
 }
@@ -159,9 +162,9 @@ func (rf *Raft) StartElect() {
 			// Increment its current term
 			rf.currentTerm++
 
-			// electInterval = rf.electInterval
 			rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
 			rf.ResetElectionTimeout()
+			fmt.Printf("Value of newElectionTimeout: %d after BECOME CANDIDATE of node: %d\n", rf.electInterval, rf.me)
 
 			rf.persist()
 
@@ -172,7 +175,8 @@ func (rf *Raft) StartElect() {
 				LastLogIndex: rf.log[len(rf.log)-1].Index,
 				LastLogTerm:  rf.log[len(rf.log)-1].Term, // term of candidate's last log entry
 			}
-			voteCount := 1
+			// voteCount := 1
+			voteCount := int32(1)
 
 			for server := range rf.peers {
 				if server == rf.me {

@@ -78,7 +78,6 @@ type Raft struct {
 	cond *sync.Cond
 
 	peerCond []*sync.Cond
-	// End of data not used in raft algorithm, but for easier to implement
 }
 
 type NodeState int
@@ -133,8 +132,10 @@ func (rf *Raft) readPersist(data []byte) {
 		rf.currentTerm = currentTerm
 		rf.votedFor = votedFor
 		rf.log = logs
-		rf.lastApplied = rf.log[0].Index
-		rf.commitIndex = rf.log[0].Index
+		// rf.lastApplied = rf.log[0].Index
+		// rf.commitIndex = rf.log[0].Index
+		rf.lastApplied = 0
+		rf.commitIndex = 0
 	}
 }
 
@@ -185,7 +186,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	// Appending new log entry into leader's log
 	newLogEntry := LogEntry{
-		Index:   len(rf.log),
+		Index:   rf.log[len(rf.log)-1].Index + 1,
 		Term:    rf.currentTerm,
 		Command: command,
 	}
@@ -250,6 +251,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.ResetElectionTimeout()
 	rf.heartbeatInterval = 120
 
+	// Dummy entry to let log start from 1th-index
 	rf.log = []LogEntry{
 		{Index: 0, Term: 0, Command: nil},
 	}
@@ -267,6 +269,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 		// Each peer uses it owns mutex
 		rf.peerCond[server] = sync.NewCond(&sync.Mutex{})
 	}
+
+	rf.nextIndex = make([]int, len(rf.peers))
+	rf.matchIndex = make([]int, len(rf.peers))
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())

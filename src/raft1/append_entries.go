@@ -104,6 +104,7 @@ func (rf *Raft) ReplicateLog(server int) {
 
 // Leader execute append entry requests and handle response
 func (rf *Raft) SendAppendEntries(server int, isHeartbeat bool) {
+	// fmt.Printf("SendAppendEntries is called by heartbeat flow: %t\n", isHeartbeat)
 	rf.cond.L.Lock()
 	if rf.state != Leader {
 		// There is a case that before a leader sending append entry request to other node,
@@ -151,6 +152,8 @@ func (rf *Raft) SendAppendEntries(server int, isHeartbeat bool) {
 		rf.votedFor = -1
 		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
 		rf.ResetElectionTimeout()
+		fmt.Printf("Value of newElectionTimeout: %d FROM LEADER to follower AFTER sending append entry message\n", rf.electInterval)
+
 		return
 	}
 
@@ -197,34 +200,32 @@ func (rf *Raft) SendAppendEntries(server int, isHeartbeat bool) {
 	// Update nextIndex(because we always send get to the end of leader's log
 	// to send.
 	// So, rf.nextIndex[server] == logIndex = len(leader's log) - 1)
-	if !isHeartbeat {
-		rf.matchIndex[server] = prevLogIndex + len(entriesList)
-		rf.nextIndex[server] = rf.matchIndex[server] + 1
+	rf.matchIndex[server] = prevLogIndex + len(entriesList)
+	rf.nextIndex[server] = rf.matchIndex[server] + 1
 
-		if rf.matchIndex[server] >= len(rf.log) {
-			panic("MATCH INDEX CAN'T BE LARGER OR EQUAL LENGTH OF LOG")
-		}
-
-		N := rf.log[len(rf.log)-1].Index
-		for N > rf.commitIndex {
-			count := 0
-			for server := range rf.peers {
-				if rf.matchIndex[server] >= N && rf.log[N].Term == rf.currentTerm {
-					count += 1
-				}
-			}
-
-			if count > len(rf.peers)/2 {
-				break
-			}
-
-			N -= 1
-		}
-		// Reupdate leader's commitIndex if majority of node commit up to N-th index
-		rf.commitIndex = N
-		// Update state machine log
-		rf.cond.Broadcast()
+	if rf.matchIndex[server] >= len(rf.log) {
+		panic("MATCH INDEX CAN'T BE LARGER OR EQUAL LENGTH OF LOG")
 	}
+
+	N := rf.log[len(rf.log)-1].Index
+	for N > rf.commitIndex {
+		count := 0
+		for server := range rf.peers {
+			if rf.matchIndex[server] >= N && rf.log[N].Term == rf.currentTerm {
+				count += 1
+			}
+		}
+
+		if count > len(rf.peers)/2 {
+			break
+		}
+
+		N -= 1
+	}
+	// Reupdate leader's commitIndex if majority of node commit up to N-th index
+	rf.commitIndex = N
+	// Update state machine log
+	rf.cond.Broadcast()
 
 	// Leader MUST check to send log to follower's node or not. In case a node
 	// joins into cluster and just receives heartbeat message, forget this can
@@ -291,16 +292,16 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs,
 
 	// Heartbeat message
 	if len(args.Entries) == 0 {
+		fmt.Printf("Node: %d receive heartbeat message from leader!!!\n", rf.me)
 		// Reupdate last time receive heartbeat message
 		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
-		rf.ResetElectionTimeout()
 
 		if args.LeaderCommit > rf.commitIndex {
 			// MUST update follower's commitIndex upto prevLogIndex-th index.
 			rf.commitIndex = min(args.LeaderCommit, args.PrevLogIndex)
 			// Update follower's state machine log
-			rf.cond.Broadcast()
 		}
+		rf.cond.Broadcast()
 
 		reply.Success = true
 		return
@@ -332,8 +333,8 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs,
 
 	if args.LeaderCommit > rf.commitIndex {
 		rf.commitIndex = min(args.LeaderCommit, rf.log[len(rf.log)-1].Index)
-		rf.cond.Broadcast()
 	}
+	rf.cond.Broadcast()
 
 	reply.Success = true
 }
