@@ -1,7 +1,6 @@
 package raft
 
 import (
-	"fmt"
 	"time"
 
 	"6.5840/raftapi"
@@ -172,8 +171,6 @@ func (rf *Raft) SendAppendEntries(server int, isHeartbeat bool) {
 			for i := appendEntryReq.PrevLogIndex - 1; i >= 0; i-- {
 				// if leader HAS XTerm
 				if rf.log[i].Term == appendEntryRes.XTerm {
-					fmt.Println("if leader HAS XTerm")
-
 					rf.nextIndex[server] = i + 1
 					rf.peerCond[server].Signal()
 					return
@@ -181,7 +178,6 @@ func (rf *Raft) SendAppendEntries(server int, isHeartbeat bool) {
 			}
 
 			// Leader doesn't have XTerm
-			fmt.Println("Leader doesn't have XTerm")
 			rf.nextIndex[server] = appendEntryRes.XIndex
 		}
 		if rf.nextIndex[server] < 1 {
