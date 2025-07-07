@@ -2,6 +2,7 @@ package raft
 
 import (
 	"math/rand"
+	"sync/atomic"
 	"time"
 )
 
@@ -25,7 +26,7 @@ type RequestVoteReply struct {
 
 // NEED to acquire lock before calling
 func (rf *Raft) ResetElectionTimeout() {
-	newElectionTimeout := (350 + (rand.Int63n(201)))
+	newElectionTimeout := 350 + (rand.Int63() % 200)
 	rf.electInterval = newElectionTimeout
 }
 
@@ -34,9 +35,10 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (3A, 3B).
 	rf.cond.L.Lock()
 	defer rf.cond.L.Unlock()
+	defer rf.persist()
 
+	reply.VoteGranted = false
 	if rf.currentTerm > args.Term {
-		reply.VoteGranted = false
 		reply.Term = rf.currentTerm
 		return
 	}
@@ -54,23 +56,18 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	reply.Term = rf.currentTerm
 
 	if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) &&
-		(args.LastLogTerm > rf.log[len(rf.log)-1].Term) ||
-		(args.LastLogTerm == rf.log[len(rf.log)-1].Term &&
-			args.LastLogIndex >= rf.log[len(rf.log)-1].Index) {
+		((args.LastLogTerm > rf.log[len(rf.log)-1].Term) ||
+			(args.LastLogTerm == rf.log[len(rf.log)-1].Term &&
+				args.LastLogIndex >= rf.log[len(rf.log)-1].Index)) {
 		// If candidates's log is up-to-date, vote for it.
 		rf.state = Follower
 		// Node MUST steps down if vote
 		rf.votedFor = args.CandidateId
 		// To avoid a node after voting quickly start election
 		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
-		rf.ResetElectionTimeout()
-
 		reply.VoteGranted = true
 		return
 	}
-
-	// All other cases, no vote
-	reply.VoteGranted = false
 }
 
 // example code to send a RequestVote RPC to a server.
@@ -100,7 +97,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 // capitalized all field names in structs passed over RPC, and
 // that the caller passes the address of the reply struct with &, not
 // the struct itself.
-func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, voteCount *int) {
+func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, voteCount *int32) {
 	reply := &RequestVoteReply{}
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
 	if !ok {
@@ -109,6 +106,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, voteCount *in
 
 	rf.cond.L.Lock()
 	defer rf.cond.L.Unlock()
+	defer rf.persist()
 
 	if reply.Term > args.Term {
 		rf.currentTerm = reply.Term
@@ -116,7 +114,6 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, voteCount *in
 		rf.votedFor = -1
 		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
 		rf.ResetElectionTimeout()
-
 		return
 	}
 
@@ -124,14 +121,11 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, voteCount *in
 		return
 	}
 
-	*voteCount++
-	if *voteCount > len(rf.peers)/2 &&
+	if atomic.AddInt32(voteCount, 1) > int32(len(rf.peers)/2) &&
 		rf.currentTerm == args.Term &&
 		rf.state == Candidate {
 		rf.state = Leader
 		rf.votedFor = -1
-		rf.nextIndex = make([]int, len(rf.peers))
-		rf.matchIndex = make([]int, len(rf.peers))
 
 		for server := range rf.peers {
 			rf.nextIndex[server] = rf.log[len(rf.log)-1].Index + 1
@@ -142,13 +136,14 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, voteCount *in
 			rf.matchIndex[server] = 0
 		}
 
-		// Notify to sendHeartbeat goroutine to send heartbeat message
+		// Notify to sendHeartbeat and update state machine
 		rf.cond.Broadcast()
 	}
 }
 
 // Goroutine
 func (rf *Raft) StartElect() {
+	// var electInterval int64
 	for !rf.killed() {
 		rf.cond.L.Lock()
 		if time.Now().UnixMilli()-rf.lastHeartbeatTimeRecv >= rf.electInterval && rf.state != Leader {
@@ -158,8 +153,11 @@ func (rf *Raft) StartElect() {
 			rf.votedFor = rf.me
 			// Increment its current term
 			rf.currentTerm++
+
 			rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
 			rf.ResetElectionTimeout()
+
+			rf.persist()
 
 			// Prepate request vote request
 			voteReq := &RequestVoteArgs{
@@ -168,7 +166,8 @@ func (rf *Raft) StartElect() {
 				LastLogIndex: rf.log[len(rf.log)-1].Index,
 				LastLogTerm:  rf.log[len(rf.log)-1].Term, // term of candidate's last log entry
 			}
-			voteCount := 1
+			// voteCount := 1
+			voteCount := int32(1)
 
 			for server := range rf.peers {
 				if server == rf.me {

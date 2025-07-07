@@ -1,7 +1,7 @@
 #!/bin/bash
 
-NUM_RUNS=300
-TEST_NAME="TestRejoin3B"
+NUM_RUNS=50
+TEST_NAME="TestFigure8Unreliable3C"
 
 pass_count=0
 fail_count=0
@@ -11,7 +11,7 @@ echo "========================================="
 
 for i in $(seq 1 $NUM_RUNS); do
   echo "Run #$i"
-  output=$(go test -v -run "^$TEST_NAME$")
+  output=$(go test -v -run "^$TEST_NAME$" 2>&1)
 
   echo "$output" | grep -E "^--- (PASS|FAIL): $TEST_NAME"
 

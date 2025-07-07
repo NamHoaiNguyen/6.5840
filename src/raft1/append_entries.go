@@ -24,6 +24,9 @@ type RequestAppendEntriesArgs struct {
 type RequestAppendEntriesReply struct {
 	Term    int  // currentTerm, for leader to update itself
 	Success bool //  true of follower container entry matching prevLogIndex and prevLogTerm
+	XTerm   int  // term in the conflicting entry(if any)
+	XIndex  int  // index of first entry with that term
+	XLen    int  // log length
 }
 
 // Goroutine
@@ -41,7 +44,7 @@ func (rf *Raft) UpdateStateMachineLogV2() {
 			applyMsg := raftapi.ApplyMsg{
 				CommandValid: true,
 				Command:      logEntry.Command,
-				CommandIndex: rf.lastApplied,
+				CommandIndex: logEntry.Index,
 			}
 			rf.cond.L.Unlock()
 			rf.applyCh <- applyMsg
@@ -79,7 +82,7 @@ func (rf *Raft) SendHeartbeats() {
 
 // NOT THREAD-SAFE
 func (rf *Raft) isReplicationNeeded(server int) bool {
-	return (rf.state == Leader && rf.log[len(rf.log)-1].Index >= rf.nextIndex[server])
+	return rf.state == Leader && rf.log[len(rf.log)-1].Index >= rf.nextIndex[server]
 }
 
 func (rf *Raft) ReplicateLog(server int) {
@@ -111,12 +114,7 @@ func (rf *Raft) SendAppendEntries(server int, isHeartbeat bool) {
 	if rf.nextIndex[server] < 1 {
 		panic("nextIndex of a server MUST >= 1")
 	}
-
-	prevLogIndex := 0
-	if rf.nextIndex[server] >= 1 {
-		// To avoid out of index
-		prevLogIndex = rf.nextIndex[server] - 1
-	}
+	prevLogIndex := rf.nextIndex[server] - 1
 
 	var entriesList []LogEntry
 	if !isHeartbeat {
@@ -137,14 +135,12 @@ func (rf *Raft) SendAppendEntries(server int, isHeartbeat bool) {
 
 	ok := rf.peers[server].Call("Raft.AppendEntries", appendEntryReq, appendEntryRes)
 	if !ok {
-		// if (!isHeartbeat) {
-		// 	rf.SendAppendEntries(server, isHeartbeat)
-		// }
 		return
 	}
 
 	rf.cond.L.Lock()
 	defer rf.cond.L.Unlock()
+	defer rf.persist()
 
 	if appendEntryRes.Term > rf.currentTerm {
 		// Leader MUST step down if follower's term > leader's term
@@ -166,15 +162,36 @@ func (rf *Raft) SendAppendEntries(server int, isHeartbeat bool) {
 	// Now leader 's term >= node's term
 	if !appendEntryRes.Success {
 		// There is inconsistency between leader's log and follower'log
-		// Leader decrease its nextIndex corressponding with follower.
-		rf.nextIndex[server]--
+		// Leader fix follower's nextIndex
+		// Optimization
+		if appendEntryRes.XLen != -1 {
+			// follower's log is too short
+			rf.nextIndex[server] = appendEntryRes.XLen
+		} else {
+			for i := appendEntryReq.PrevLogIndex - 1; i >= 0; i-- {
+				// if leader HAS XTerm
+				if rf.log[i].Term == appendEntryRes.XTerm {
+					rf.nextIndex[server] = i + 1
+					rf.peerCond[server].Signal()
+					return
+				}
+			}
+
+			// Leader doesn't have XTerm
+			rf.nextIndex[server] = appendEntryRes.XIndex
+		}
+		if rf.nextIndex[server] < 1 {
+			rf.nextIndex[server] = 1
+		}
+
 		rf.peerCond[server].Signal()
 		return
 	}
 
 	// Incase appendEntryRes.Success == true
 	// Update nextIndex(because we always send get to the end of leader's log
-	// to send. In other words, rf.nextIndex[server] == logIndex = len(leader's log) - 1)
+	// to send.
+	// So, rf.nextIndex[server] == logIndex = len(leader's log) - 1)
 	rf.matchIndex[server] = prevLogIndex + len(entriesList)
 	rf.nextIndex[server] = rf.matchIndex[server] + 1
 
@@ -185,8 +202,8 @@ func (rf *Raft) SendAppendEntries(server int, isHeartbeat bool) {
 	N := rf.log[len(rf.log)-1].Index
 	for N > rf.commitIndex {
 		count := 0
-		for i := 0; i < len(rf.peers); i++ {
-			if rf.matchIndex[i] >= N && rf.log[N].Term == rf.currentTerm {
+		for server := range rf.peers {
+			if rf.matchIndex[server] >= N && rf.log[N].Term == rf.currentTerm {
 				count += 1
 			}
 		}
@@ -199,7 +216,6 @@ func (rf *Raft) SendAppendEntries(server int, isHeartbeat bool) {
 	}
 	// Reupdate leader's commitIndex if majority of node commit up to N-th index
 	rf.commitIndex = N
-
 	// Update state machine log
 	rf.cond.Broadcast()
 
@@ -218,56 +234,68 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs,
 	reply *RequestAppendEntriesReply) {
 	rf.cond.L.Lock()
 	defer rf.cond.L.Unlock()
+	defer rf.persist()
+
+	reply.Success = false
+	// Init default value for fields used for optimization
+	reply.XIndex = -1
+	reply.XTerm = -1
+	reply.XLen = -1
 
 	if args.Term < rf.currentTerm {
 		// if request's term < node's current term. Return false
 		// (and node who sent request must be steps down to follower)
-		reply.Success = false
 		reply.Term = rf.currentTerm
 		return
 	}
 
+	// reply's term = args's term because args.Term >= rf.currentTerm
 	reply.Term = args.Term
 
-	if (len(rf.log) <= args.PrevLogIndex) ||
-		(len(rf.log) > args.PrevLogIndex &&
-			rf.log[args.PrevLogIndex].Term != args.PrevLogTerm) {
-		// If log doesn't contain an entry at prevLogIndex
-		// whose term matches prevLogTerm, return success = false
-		reply.Success = false
+	if args.Term > rf.currentTerm {
+		rf.votedFor = -1
+	}
+	// Now args's term >= node's currentTerm
+	rf.currentTerm = args.Term
+	rf.state = Follower
+	// Reupdate last time receive heartbeat message
+	rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
+
+	// If log doesn't contain an entry at prevLogIndex
+	// whose term matches prevLogTerm, return success = false
+	if args.PrevLogIndex >= len(rf.log) {
+		reply.XLen = len(rf.log) - 1
 		return
 	}
 
-	// Now args's term >= node's currentTerm
-	rf.currentTerm = args.Term
+	if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+		// optimization
+		conflictTerm := rf.log[args.PrevLogIndex].Term
+		reply.XTerm = conflictTerm
+		// Find the first index that stores term of conflicting entry
+		// for i := args.PrevLogIndex; i >= 0; i-- {
+		for i := 0; i <= args.PrevLogIndex; i++ {
+			if rf.log[i].Term == conflictTerm {
+				reply.XIndex = i
+				return
+			}
+		}
+	}
 
-	rf.state = Follower
-	rf.votedFor = -1
-
-	if args.Entries == nil {
-		// Reupdate last time receive heartbeat message
-		rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
-		rf.ResetElectionTimeout()
-
+	// Heartbeat message
+	if len(args.Entries) == 0 {
 		if args.LeaderCommit > rf.commitIndex {
 			// MUST update follower's commitIndex upto prevLogIndex-th index.
-			rf.commitIndex = min(args.LeaderCommit, args.PrevLogIndex)
+			rf.commitIndex = min(args.LeaderCommit, rf.log[args.PrevLogIndex].Index)
 			// Update follower's state machine log
-			rf.cond.Broadcast()
 		}
+		rf.cond.Broadcast()
 
 		reply.Success = true
 		return
 	}
 
-	rf.HandleAppendEntryLog(args, reply)
-}
-
-// RECEIVER. Only respond to leader after apply entry to state machine
-// NOT THREAD-SAFE
-func (rf *Raft) HandleAppendEntryLog(
-	args *RequestAppendEntriesArgs,
-	reply *RequestAppendEntriesReply) {
+	// AppendLog message
 	numEntries := 0
 	for _, entry := range args.Entries {
 		logEntryIndex := entry.Index
@@ -278,7 +306,8 @@ func (rf *Raft) HandleAppendEntryLog(
 			continue
 		}
 
-		if logEntryIndex < len(rf.log) && logEntryTerm != rf.log[logEntryIndex].Term {
+		if logEntryIndex < len(rf.log) && logEntryTerm != rf.log[logEntryIndex].Term ||
+			logEntryIndex >= len(rf.log) {
 			// delete the existing entry and all that follow it
 			rf.log = rf.log[:logEntryIndex]
 			// In case condition is hit, all following entry after logEntryIndex was deleted.
@@ -292,8 +321,8 @@ func (rf *Raft) HandleAppendEntryLog(
 
 	if args.LeaderCommit > rf.commitIndex {
 		rf.commitIndex = min(args.LeaderCommit, rf.log[len(rf.log)-1].Index)
-		rf.cond.Broadcast()
 	}
+	rf.cond.Broadcast()
 
 	reply.Success = true
 }

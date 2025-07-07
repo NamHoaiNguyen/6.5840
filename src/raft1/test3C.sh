@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # List of tests to run
-tests=("TestBasicAgree3B" "TestRPCBytes3B" "TestFollowerFailure3B" "TestLeaderFailure3B" "TestFailAgree3B"
-       "TestFailNoAgree3B" "TestConcurrentStarts3B" "TestRejoin3B" "TestBackup3B" "TestCount3B")
-NUM_RUNS=30
+tests=("TestPersist13C" "TestPersist23C" "TestPersist33C" "TestFigure83C"
+       "TestUnreliableAgree3C" "TestFigure8Unreliable3C" "TestReliableChurn3C" "TestUnreliableChurn3C")
+NUM_RUNS=50
 
 # Initialize counters
 declare -A pass_count
