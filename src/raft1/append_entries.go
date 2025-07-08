@@ -30,7 +30,7 @@ type RequestAppendEntriesReply struct {
 }
 
 // Goroutine
-func (rf *Raft) UpdateStateMachineLogV2() {
+func (rf *Raft) UpdateStateMachineLog() {
 	for !rf.killed() {
 		rf.cond.L.Lock()
 
@@ -40,11 +40,10 @@ func (rf *Raft) UpdateStateMachineLogV2() {
 
 		for rf.commitIndex > rf.lastApplied {
 			rf.lastApplied++
-			logEntry := rf.log[rf.lastApplied]
 			applyMsg := raftapi.ApplyMsg{
 				CommandValid: true,
-				Command:      logEntry.Command,
-				CommandIndex: logEntry.Index,
+				Command:      rf.log[rf.lastApplied].Command,
+				CommandIndex: rf.log[rf.lastApplied].Index,
 			}
 			rf.cond.L.Unlock()
 			rf.applyCh <- applyMsg
@@ -72,7 +71,7 @@ func (rf *Raft) SendHeartbeats() {
 			}
 
 			// Leader doesn't be blocking to receive response from followers
-			go rf.SendAppendEntries(server, true /*isHearbeat*/)
+			go rf.SendAppendEntries(server)
 		}
 
 		// Sleep for heartbeatInterval(ms)
@@ -97,12 +96,12 @@ func (rf *Raft) ReplicateLog(server int) {
 		rf.cond.L.Unlock()
 		rf.peerCond[server].L.Unlock()
 
-		rf.SendAppendEntries(server, false /*isHeartbeat*/)
+		rf.SendAppendEntries(server)
 	}
 }
 
 // Leader execute append entry requests and handle response
-func (rf *Raft) SendAppendEntries(server int, isHeartbeat bool) {
+func (rf *Raft) SendAppendEntries(server int) {
 	rf.cond.L.Lock()
 	if rf.state != Leader {
 		// There is a case that before a leader sending append entry request to other node,
@@ -117,10 +116,7 @@ func (rf *Raft) SendAppendEntries(server int, isHeartbeat bool) {
 	prevLogIndex := rf.nextIndex[server] - 1
 
 	var entriesList []LogEntry
-	if !isHeartbeat {
-		// Only append entry message has entries log
-		entriesList = append(entriesList, rf.log[(prevLogIndex+1):]...)
-	}
+	entriesList = append(entriesList, rf.log[(prevLogIndex+1):]...)
 
 	appendEntryReq := &RequestAppendEntriesArgs{
 		Term:         rf.currentTerm,
@@ -280,22 +276,10 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs,
 				return
 			}
 		}
-	}
-
-	// Heartbeat message
-	if len(args.Entries) == 0 {
-		if args.LeaderCommit > rf.commitIndex {
-			// MUST update follower's commitIndex upto prevLogIndex-th index.
-			rf.commitIndex = min(args.LeaderCommit, rf.log[args.PrevLogIndex].Index)
-			// Update follower's state machine log
-		}
-		rf.cond.Broadcast()
-
-		reply.Success = true
 		return
 	}
 
-	// AppendLog message
+	// Append log
 	numEntries := 0
 	for _, entry := range args.Entries {
 		logEntryIndex := entry.Index
@@ -316,7 +300,6 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs,
 			break
 		}
 	}
-
 	rf.log = append(rf.log, args.Entries[numEntries:]...)
 
 	if args.LeaderCommit > rf.commitIndex {

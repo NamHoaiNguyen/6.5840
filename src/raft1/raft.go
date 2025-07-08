@@ -132,10 +132,8 @@ func (rf *Raft) readPersist(data []byte) {
 		rf.currentTerm = currentTerm
 		rf.votedFor = votedFor
 		rf.log = logs
-		// rf.lastApplied = rf.log[0].Index
-		// rf.commitIndex = rf.log[0].Index
-		rf.lastApplied = 0
-		rf.commitIndex = 0
+		rf.lastApplied = rf.log[0].Index
+		rf.commitIndex = rf.log[0].Index
 		rf.state = Follower
 	}
 }
@@ -250,7 +248,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// Node's beginning state = Follower
 	rf.state = Follower
 	rf.ResetElectionTimeout()
-	rf.heartbeatInterval = 120
+	rf.heartbeatInterval = 110
 
 	// Dummy entry to let log start from 1th-index
 	rf.log = []LogEntry{
@@ -282,9 +280,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// Leader periodically send heartbeat to other nodes
 	go rf.SendHeartbeats()
 	// Background task which update log to state machine
-	go rf.UpdateStateMachineLogV2()
+	go rf.UpdateStateMachineLog()
 	// Init retry sending message
-	// go rf.ReplicateLog()
 	for server := range rf.peers {
 		if server == rf.me {
 			continue
