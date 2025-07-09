@@ -160,6 +160,8 @@ func (rf *Raft) PersistBytes() int {
 // that index. Raft should now trim its log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (3D).
+	rf.cond.L.Lock()
+	defer rf.cond.L.Unlock()
 }
 
 // the service using Raft (e.g. a k/v server) wants to start
