@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"fmt"
 	"time"
 
 	"6.5840/raftapi"
@@ -37,6 +38,19 @@ func (rf *Raft) UpdateStateMachineLog() {
 		for rf.lastApplied >= rf.commitIndex {
 			rf.cond.Wait()
 		}
+
+		rf.cond.L.Unlock()
+		if rf.smsg != nil {
+			rf.cond.L.Lock()
+			msg := rf.smsg
+			rf.smsg = nil
+			rf.cond.L.Unlock()
+			rf.applyCh <- *msg
+		}
+
+		// Re-acquire log
+		rf.cond.L.Lock()
+		fmt.Printf("Value of state: %d of node: %d\n", rf.state, rf.me)
 
 		for rf.commitIndex > rf.lastApplied {
 			rf.lastApplied++
@@ -96,7 +110,15 @@ func (rf *Raft) ReplicateLog(server int) {
 		rf.cond.L.Unlock()
 		rf.peerCond[server].L.Unlock()
 
-		rf.SendAppendEntries(server)
+		// rf.SendAppendEntries(server)
+		// Safe to send log append entries
+		if rf.nextIndex[server] > rf.log[0].Index {
+			rf.SendAppendEntries(server)
+			continue
+		}
+
+		// Must send the full snapshot
+		rf.SendSnapshotInstall(server)
 	}
 }
 
@@ -213,6 +235,7 @@ func (rf *Raft) SendAppendEntries(server int) {
 	// Reupdate leader's commitIndex if majority of node commit up to N-th index
 	rf.commitIndex = N
 	// Update state machine log
+	// TODO(namnh) : Should fix spurious wakeup
 	rf.cond.Broadcast()
 
 	// Leader MUST check to send log to follower's node or not. In case a node
@@ -305,6 +328,7 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs,
 	if args.LeaderCommit > rf.commitIndex {
 		rf.commitIndex = min(args.LeaderCommit, rf.log[len(rf.log)-1].Index)
 	}
+	// TODO(namnh) : Should fix spurious wakeup
 	rf.cond.Broadcast()
 
 	reply.Success = true

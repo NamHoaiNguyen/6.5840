@@ -10,6 +10,7 @@ import (
 	//	"bytes"
 
 	"bytes"
+	"fmt"
 	"log"
 	"sync"
 	"sync/atomic"
@@ -72,8 +73,14 @@ type Raft struct {
 	// (Reinitialized after election)
 	matchIndex []int
 
+	// lastIncludedIndex int
+
+	// lastIncludedTerm int
+
 	// Specific for Lab
 	applyCh chan raftapi.ApplyMsg
+
+	smsg *raftapi.ApplyMsg
 
 	cond *sync.Cond
 
@@ -108,9 +115,10 @@ func (rf *Raft) persist() {
 	// Your code here (3C).
 	if rf.persister.ReadSnapshot() != nil {
 		rf.persister.Save(rf.encodeState(), rf.persister.ReadSnapshot())
-	} else {
-		rf.persister.Save(rf.encodeState(), nil)
+		return
 	}
+
+	rf.persister.Save(rf.encodeState(), nil)
 }
 
 // restore previously persisted state.
@@ -124,7 +132,12 @@ func (rf *Raft) readPersist(data []byte) {
 	var currentTerm int
 	var votedFor int
 	var logs []LogEntry
+	// 3D
+	// var lastIncludedIndex int
+	// var lastIncludedTerm int
 
+	// if d.Decode(&currentTerm) != nil || d.Decode(&votedFor) != nil || d.Decode(&logs) != nil ||
+	// 	d.Decode(&lastIncludedIndex) != nil || d.Decode(&lastIncludedTerm) != nil {
 	if d.Decode(&currentTerm) != nil || d.Decode(&votedFor) != nil || d.Decode(&logs) != nil {
 		log.Fatal("failed to read persist\n")
 	} else {
@@ -135,6 +148,10 @@ func (rf *Raft) readPersist(data []byte) {
 		rf.lastApplied = rf.log[0].Index
 		rf.commitIndex = rf.log[0].Index
 		rf.state = Follower
+
+		// 3D
+		// rf.lastIncludedIndex = lastIncludedIndex
+		// rf.lastIncludedTerm = lastIncludedTerm
 	}
 }
 
@@ -144,6 +161,10 @@ func (rf *Raft) encodeState() []byte {
 	e.Encode(rf.currentTerm)
 	e.Encode(rf.votedFor)
 	e.Encode(rf.log)
+
+	// 3D
+	// e.Encode(rf.lastIncludedIndex)
+	// e.Encode(rf.lastIncludedTerm)
 	return w.Bytes()
 }
 
@@ -162,6 +183,28 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (3D).
 	rf.cond.L.Lock()
 	defer rf.cond.L.Unlock()
+
+	// TODO(namnh, 3D) : Recheck
+	if index >= len(rf.log) {
+		return
+	}
+
+	// Inlcude lastIncludedIndex and lastIncludedTerm in snapshot
+	if index <= rf.log[0].Index {
+		return
+	}
+
+	fmt.Println("Value of log BEFORE snapshot", rf.log)
+
+	// Truncate the log(keep index 0-th)
+	// TODO(namnh, 3D, IMPORTANT) : CAREFUL !!!
+	// Raft must discard old log entries in a way that allows the Go garbage collector to free and re-use the memory;
+	// this requires that there be no reachable references (pointers) to the discarded log entries.
+	// rf.log = append(rf.log[:1], rf.log[index+1])
+	// Because raft start from 1-th index.
+	rf.log = append([]LogEntry{rf.log[0]}, rf.log[index:]...)
+	fmt.Println("Value of log after snapshot", rf.log)
+	rf.persister.Save(rf.encodeState(), snapshot)
 }
 
 // the service using Raft (e.g. a k/v server) wants to start
@@ -273,6 +316,11 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	rf.nextIndex = make([]int, len(rf.peers))
 	rf.matchIndex = make([]int, len(rf.peers))
+
+	// Snapshot
+	// rf.lastIncludedIndex = 0
+	// rf.lastIncludedTerm = 0
+	rf.smsg = nil
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
