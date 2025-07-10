@@ -60,6 +60,7 @@ func (rf *Raft) UpdateStateMachineLog() {
 				CommandValid: true,
 				// Command:      rf.log[rf.lastApplied].Command,
 				// CommandIndex: rf.log[rf.lastApplied].Index,
+				// TODO(namnh, 3D) : Change
 				Command:      rf.log[startIndexInMem].Command,
 				CommandIndex: rf.log[startIndexInMem].Index,
 			}
@@ -89,7 +90,9 @@ func (rf *Raft) SendHeartbeats() {
 			}
 
 			// Leader doesn't be blocking to receive response from followers
-			go rf.SendAppendEntries(server)
+			// go rf.SendAppendEntries(server)
+			// TODO(namnh, 3D) : Change to adapt
+			go rf.SendRPC(server)
 		}
 
 		// Sleep for heartbeatInterval(ms)
@@ -115,19 +118,36 @@ func (rf *Raft) ReplicateLog(server int) {
 		rf.peerCond[server].L.Unlock()
 
 		// rf.SendAppendEntries(server)
-		// Safe to send log append entries
-		if rf.nextIndex[server] > rf.log[0].Index {
-			rf.SendAppendEntries(server)
-		} else {
-			fmt.Printf("Value of rf.nextIndex[server] MUST be <=0 : %d\n", rf.nextIndex[server])
-			// Must send the full snapshot
-			rf.SendInstallSnapshot(server)
-		}
+		// TODO(namnh, 3D) : Change to adapt
+		rf.SendRPC(server)
 	}
 }
 
+func (rf *Raft) SendRPC(server int) {
+	rf.cond.L.Lock()
+
+	// TODO(namnh, 3D, IMPORTANT) ; not atomic when unlock then calling SendAppendEntries
+	// Maybe the condition is not corrected anymore
+	if rf.nextIndex[server] > rf.log[0].Index {
+		appendEntryReq, appendEntryRes := rf.SetupAppendEntryParams(server)
+		// MUST Unlock before calling SendAppendEntries
+		rf.cond.L.Unlock()
+		rf.SendAppendEntries(server, appendEntryReq, appendEntryRes)
+		return
+	}
+
+	// Must send the full snapshot
+	fmt.Printf("Value of rf.nextIndex[server]: %d MUST be <= rf.log[0].Index : %d\n", rf.nextIndex[server], rf.log[0].Index)
+
+	installSnapshotReq, installSnapshotRes := rf.SetupInstallSnapshotParams(server)
+	// MUST Unlock before calling SendInstallSnapshot
+	rf.cond.L.Unlock()
+	fmt.Println("SendInstallSnapshot is called!!!")
+	rf.SendInstallSnapshot(server, installSnapshotReq, installSnapshotRes)
+}
+
 // NOT THREAD-SAFE
-func (rf *Raft) SetupAppendEntryParams(server int) (*RequestAppendEntriesArgs, *RequestAppendEntriesReply ) {
+func (rf *Raft) SetupAppendEntryParams(server int) (RequestAppendEntriesArgs, RequestAppendEntriesReply) {
 	if rf.nextIndex[server] < 1 {
 		panic("nextIndex of a server MUST >= 1")
 	}
@@ -144,26 +164,29 @@ func (rf *Raft) SetupAppendEntryParams(server int) (*RequestAppendEntriesArgs, *
 	prevLogIndexInMem := prevLogIndex - indexGap
 	fmt.Printf("Value of prevLogIndex: %d and indexGap: %d, prevLogIndexInMem: %d in SetupAppendEntryParams\n", prevLogIndex, indexGap, prevLogIndexInMem)
 
-
 	// Length of log that leader will send to follower
 	logLengthSend := len(rf.log) - prevLogIndexInMem - 1
 	fmt.Printf("Value of prevLogIndexInMem: %d and logLengthSend: %d in SetupAppendEntryParams\n", prevLogIndexInMem, logLengthSend)
 	entriesList := make([]LogEntry, logLengthSend)
 	copy(entriesList, rf.log[prevLogIndexInMem+1:])
 
-	return &RequestAppendEntriesArgs{
+	return RequestAppendEntriesArgs{
 		Term:         rf.currentTerm,
 		LeaderId:     rf.me,
 		PrevLogIndex: prevLogIndex,
+		// TODO(namnh, 3D) : Change to adapt
 		// PrevLogTerm:  rf.log[prevLogIndex].Term,
 		PrevLogTerm:  rf.log[prevLogIndexInMem].Term,
 		Entries:      entriesList,
 		LeaderCommit: rf.commitIndex,
-	}, &RequestAppendEntriesReply{}
+	}, RequestAppendEntriesReply{}
 }
 
 // Leader execute append entry requests and handle response
-func (rf *Raft) SendAppendEntries(server int) {
+func (rf *Raft) SendAppendEntries(
+	server int,
+	appendEntryReq RequestAppendEntriesArgs,
+	appendEntryRes RequestAppendEntriesReply) {
 	rf.cond.L.Lock()
 	if rf.state != Leader {
 		// There is a case that before a leader sending append entry request to other node,
@@ -171,11 +194,9 @@ func (rf *Raft) SendAppendEntries(server int) {
 		rf.cond.L.Unlock()
 		return
 	}
-
-	appendEntryReq, appendEntryRes := rf.SetupAppendEntryParams(server)
 	rf.cond.L.Unlock()
 
-	ok := rf.peers[server].Call("Raft.AppendEntries", appendEntryReq, appendEntryRes)
+	ok := rf.peers[server].Call("Raft.AppendEntries", &appendEntryReq, &appendEntryRes)
 	if !ok {
 		return
 	}
@@ -243,21 +264,21 @@ func (rf *Raft) SendAppendEntries(server int) {
 	rf.nextIndex[server] = rf.matchIndex[server] + 1
 	fmt.Printf("Value of rf.nextIndex[server] : %d  of server: %d appendEntryRes.Success == true\n", rf.nextIndex[server], server)
 
-
 	// if rf.matchIndex[server] >= len(rf.log) {
-		fmt.Println("Value of log when panic", rf.log)		
-		fmt.Println("namnh Value of length of log when panic", len(rf.log))
-		fmt.Printf("Value of rf.matchindex[server]: %d at leader node: %d and state: %d\n", rf.matchIndex[server], rf.me, rf.state)
-		fmt.Printf("Value of appendEntryReq.PrevLogIndex: %d and len(appendEntryReq.Entries): %d\n", appendEntryReq.PrevLogIndex, len(appendEntryReq.Entries))
-		// panic("MATCH INDEX CAN'T BE LARGER OR EQUAL LENGTH OF LOG")
+	fmt.Println("Value of log after updating matchindex and nextindex at server", rf.log)
+	fmt.Println("namnh Value of length of log when panic", len(rf.log))
+	fmt.Printf("Value of rf.matchindex[server]: %d at leader node: %d and state: %d\n", rf.matchIndex[server], rf.me, rf.state)
+	fmt.Printf("Value of appendEntryReq.PrevLogIndex: %d and len(appendEntryReq.Entries): %d\n", appendEntryReq.PrevLogIndex, len(appendEntryReq.Entries))
+	// panic("MATCH INDEX CAN'T BE LARGER OR EQUAL LENGTH OF LOG")
 	// }
 
 	N := rf.log[len(rf.log)-1].Index
 	for N > rf.commitIndex {
 		count := 0
 		for server := range rf.peers {
+			// TODO(namnh, 3D) : Change to adapt 3D
 			// if rf.matchIndex[server] >= N && rf.log[N].Term == rf.currentTerm {
-			if rf.matchIndex[server] >= N && rf.log[N - rf.log[0].Index].Term == rf.currentTerm {
+			if rf.matchIndex[server] >= N && rf.log[N-rf.log[0].Index].Term == rf.currentTerm {
 				count += 1
 			}
 		}
@@ -338,8 +359,11 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs,
 		return
 	}
 
-	// Append log
-	// TODO(namnh, 3D) : Recheck that this logic should ve revised or not
+	// If an existing entry conflicts with a new one (same index
+	// but different terms), delete the existing entry and all that
+	// follow it (§5.3)
+	// Append any new entries not already in the log
+	// TODO(namnh, 3D) : Recheck that this logic should be revised or not
 	numEntries := 0
 	for _, entry := range args.Entries {
 		logEntryIndex := entry.Index
@@ -366,7 +390,11 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs,
 	if args.LeaderCommit > rf.commitIndex {
 		rf.commitIndex = min(args.LeaderCommit, rf.log[len(rf.log)-1].Index)
 	}
-	// TODO(namnh) : Should fix spurious wakeup
+
+	fmt.Printf("Log of follower node : %d after handling append entry request\n", rf.me)
+	fmt.Println("Log of followern node append entry !!!", rf.log)
+
+	// TODO(namnh) : Should care about thundering herd
 	rf.cond.Broadcast()
 
 	reply.Success = true

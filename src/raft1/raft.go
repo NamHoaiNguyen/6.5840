@@ -10,6 +10,7 @@ import (
 	//	"bytes"
 
 	"bytes"
+	"fmt"
 	"log"
 	"sync"
 	"sync/atomic"
@@ -167,32 +168,32 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.cond.L.Lock()
 	defer rf.cond.L.Unlock()
 
-	// // TODO(namnh, 3D) : Recheck
-	// if index >= len(rf.log) {
-	// 	return
-	// }
+	// TODO(namnh, 3D) : Recheck
+	if index >= len(rf.log) {
+		return
+	}
 
 	// if index <= rf.log[0].Index {
 	// 	return
 	// }
 
-	// // TODO(namnh, 3D) : Recheck
+	// TODO(namnh, 3D) : Recheck
 	// if index > rf.lastApplied {
 	// 	return
 	// }
 
-	// fmt.Printf("check snapshot at node: %d with state: %d\n", rf.me, rf.state)
-	// fmt.Println("Value of log BEFORE snapshot", rf.log)
+	fmt.Printf("check snapshot at node: %d with state: %d\n", rf.me, rf.state)
+	fmt.Println("Value of log BEFORE snapshot", rf.log)
 
-	// // Truncate the log(keep index 0-th)
-	// // TODO(namnh, 3D, IMPORTANT) : CAREFUL !!!
-	// // MUST remove dump entry at 0-th index and replace it
-	// // with entry at index-th
-	// rf.log = append([]LogEntry{}, rf.log[index:]...)
-	// rf.log[0].Command = nil
-	// fmt.Println("Value of log after snapshot", rf.log)
+	// Truncate the log(keep index 0-th)
+	// TODO(namnh, 3D, IMPORTANT) : CAREFUL !!!
+	// MUST remove dump entry at 0-th index and replace it
+	// with entry at index-th
+	rf.log = append([]LogEntry{}, rf.log[index-rf.log[0].Index:]...)
+	rf.log[0].Command = nil
+	fmt.Println("Value of log after be truncated by snapshot", rf.log)
 
-	// rf.persister.Save(rf.encodeState(), snapshot)
+	rf.persister.Save(rf.encodeState(), snapshot)
 }
 
 // the service using Raft (e.g. a k/v server) wants to start
