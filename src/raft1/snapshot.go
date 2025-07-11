@@ -1,7 +1,6 @@
 package raft
 
 import (
-	"fmt"
 	"time"
 
 	"6.5840/raftapi"
@@ -91,8 +90,7 @@ func (rf *Raft) SendInstallSnapshot(
 		return
 	}
 
-	// TODO(namnh, 3D) : Recheck
-	// Does leader need to recheck args'Lastincluded index with index
+	// Leader need to recheck args'Lastincluded index with index
 	// of 0-th log entry
 	if req.LastIncludedIndex != rf.log[0].Index {
 		return
@@ -103,8 +101,6 @@ func (rf *Raft) SendInstallSnapshot(
 	rf.matchIndex[server] = req.LastIncludedIndex
 	rf.nextIndex[server] = req.LastIncludedIndex + 1
 
-	fmt.Printf("Value of rf.matchIndex[server]: %d and rf.nextIndex[server]: %d at server after install snapshot\n", rf.matchIndex[server], rf.nextIndex[server])
-
 	rf.persister.Save(rf.encodeState(), req.Data)
 }
 
@@ -112,8 +108,6 @@ func (rf *Raft) SendInstallSnapshot(
 func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
 	rf.cond.L.Lock()
 	defer rf.cond.L.Unlock()
-
-	fmt.Printf("Value of rf.commitIndex: %d and args.LastIncludedIndex: %d and  in InstallSnapshot", rf.commitIndex, args.LastIncludedIndex)
 
 	// Immediately return if leader's term < node's currentTerm
 	if rf.currentTerm > args.Term {
@@ -123,13 +117,10 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 
 	if rf.commitIndex >= args.LastIncludedIndex {
 		// Snapshot is stale
-		fmt.Println("InstallSnapshot of follower IS DISCARDED request from leader BECAUSE OF rf.commitIndex >= args.LastIncludedIndex")
-
 		reply.Term = rf.currentTerm
 		return
 	}
 
-	fmt.Println("InstallSnapshot of follower ACCEPT request from leader")
 	// SnapshotInstall request should also be treated as a kind of heartbeat at the follower
 	// So, follower should update its last time receiving heartbeat
 	rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
@@ -174,25 +165,17 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 				Index:   args.LastIncludedIndex,
 				Term:    args.LastIncludedTerm,
 				Command: nil,
-			} )
-		fmt.Printf("Log of follower node: %d after discall ENTIRELY when receing install snapshot request from leader\n", rf.me)
-		fmt.Println("All log", rf.log)
+			})
 	} else {
 		// 6. If existing log entry has same index and term as snapshot’s
 		// last included entry, retain log entries following it and reply
 		rf.log = append([]LogEntry{}, rf.log[logEntryIndexInMem:]...)
 		rf.log[0].Command = nil
-		fmt.Printf("Log of follower node: %d after discall PARTIALLY when receing install snapshot request from leader\n", rf.me)
-		fmt.Println("All log", rf.log)
 	}
 
 	// Update commitIndex and lastApplied
-	// TODO(namnh, 3D) : Recheck this one
 	rf.commitIndex = args.LastIncludedIndex
 	rf.lastApplied = args.LastIncludedIndex
-
-	fmt.Printf("Log of follower node : %d after handling installsnapshot request\n", rf.me)
-	fmt.Println("Log of follower node in installsnapshot request!!!", rf.log)
 
 	// Persist the snapshot
 	rf.persister.Save(rf.encodeState(), args.Data)
