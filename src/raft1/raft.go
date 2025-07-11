@@ -169,18 +169,11 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	defer rf.cond.L.Unlock()
 
 	// TODO(namnh, 3D) : Recheck
-	if index >= len(rf.log) {
-		return
-	}
-
-	// if index <= rf.log[0].Index {
+	// if index >= len(rf.log) {
 	// 	return
 	// }
-
-	// TODO(namnh, 3D) : Recheck
-	// if index > rf.lastApplied {
-	// 	return
-	// }
+	
+	// if index 
 
 	fmt.Printf("check snapshot at node: %d with state: %d\n", rf.me, rf.state)
 	fmt.Println("Value of log BEFORE snapshot", rf.log)

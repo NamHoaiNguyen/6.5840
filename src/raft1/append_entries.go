@@ -158,13 +158,16 @@ func (rf *Raft) SetupAppendEntryParams(server int) (RequestAppendEntriesArgs, Re
 
 	// Need a mapping between real index of log and log's index in slice because of snapshot
 	prevLogIndex := rf.nextIndex[server] - 1
-	indexGap := rf.log[0].Index
+	firstIndex := rf.log[0].Index
 	// Get Index of prevLogIndex in slice index
 	// (Start index can be 0 or rf.log[0].Index in case snapshot)
-	prevLogIndexInMem := prevLogIndex - indexGap
-	fmt.Printf("Value of prevLogIndex: %d and indexGap: %d, prevLogIndexInMem: %d in SetupAppendEntryParams\n", prevLogIndex, indexGap, prevLogIndexInMem)
+	prevLogIndexInMem := prevLogIndex - firstIndex
+	if (prevLogIndexInMem < 0) {
+		panic("prevLogIndexInMem CAN'T LESS THAN 0 IN SetupAppendEntryParams")
+	}
+	fmt.Printf("Value of prevLogIndex: %d and firstIndex: %d, prevLogIndexInMem: %d in SetupAppendEntryParams\n", prevLogIndex, firstIndex, prevLogIndexInMem)
 
-	// Length of log that leader will send to follower
+	// Length of log that +leader will send to follower
 	logLengthSend := len(rf.log) - prevLogIndexInMem - 1
 	fmt.Printf("Value of prevLogIndexInMem: %d and logLengthSend: %d in SetupAppendEntryParams\n", prevLogIndexInMem, logLengthSend)
 	entriesList := make([]LogEntry, logLengthSend)
@@ -222,31 +225,62 @@ func (rf *Raft) SendAppendEntries(
 		return
 	}
 
-	// Now leader 's term >= node's term
-	if !appendEntryRes.Success {
-		// There is inconsistency between leader's log and follower'log
-		// Leader fix follower's nextIndex
-		// Optimization
-		if appendEntryRes.XLen != -1 {
-			// follower's log is too short
-			rf.nextIndex[server] = appendEntryRes.XLen
-			fmt.Printf("Value of rf.nextIndex[server] : %d  of server: %d when followr log is too short\n", rf.nextIndex[server], server)
-		} else {
-			for i := appendEntryReq.PrevLogIndex - 1; i >= 0; i-- {
-				// if leader HAS XTerm
-				if rf.log[i].Term == appendEntryRes.XTerm {
-					rf.nextIndex[server] = i + 1
-					fmt.Printf("Value of rf.nextIndex[server] : %d  of server: %d if leader HAS XTerm\n", rf.nextIndex[server], server)
+	// // Now leader 's term >= node's term
+	// if !appendEntryRes.Success {
+	// 	// There is inconsistency between leader's log and follower'log
+	// 	// Leader fix follower's nextIndex
+	// 	// Optimization
+	// 	if appendEntryRes.XLen != -1 {
+	// 		// follower's log is too short
+	// 		rf.nextIndex[server] = appendEntryRes.XLen
+	// 		fmt.Printf("Value of rf.nextIndex[server] : %d  of server: %d when followr log is too short\n", rf.nextIndex[server], server)
+	// 	} else {
+	// 		for i := appendEntryReq.PrevLogIndex - 1; i >= 0; i-- {
+	// 			// if leader HAS XTerm
+	// 			if rf.log[i].Term == appendEntryRes.XTerm {
+	// 				rf.nextIndex[server] = i + 1
+	// 				fmt.Printf("Value of rf.nextIndex[server] : %d  of server: %d if leader HAS XTerm\n", rf.nextIndex[server], server)
 
-					rf.peerCond[server].Signal()
-					return
+	// 				rf.peerCond[server].Signal()
+	// 				return
+	// 			}
+	// 		}
+
+	// 		// Leader doesn't have XTerm
+	// 		rf.nextIndex[server] = appendEntryRes.XIndex
+	// 		fmt.Printf("Value of rf.nextIndex[server] : %d  of server: %d if  Leader doesn't have XTerm\n", rf.nextIndex[server], server)
+
+	// 	}
+	// 	if rf.nextIndex[server] < 1 {
+	// 		rf.nextIndex[server] = 1
+	// 	}
+
+	  // TODO(namnh, 3D) : Change
+		// Now leader 's term >= node's term
+		if !appendEntryRes.Success {
+			// There is inconsistency between leader's log and follower'log
+			// Leader fix follower's nextIndex
+			// Optimization
+			if appendEntryRes.XLen != -1 {
+				// follower's log is too short
+				rf.nextIndex[server] = appendEntryRes.XLen
+				fmt.Printf("Value of rf.nextIndex[server] : %d  of server: %d when followr log is too short\n", rf.nextIndex[server], server)
+			} else {
+				prevLogIndexInMem := appendEntryReq.PrevLogIndex - rf.log[0].Index
+				for i := prevLogIndexInMem; i >= 0; i-- {
+					// if leader HAS XTerm
+					if rf.log[i].Term == appendEntryRes.XTerm {
+						rf.nextIndex[server] = i + 1 + rf.log[0].Index
+						fmt.Printf("Value of rf.nextIndex[server] : %d  of server: %d if leader HAS XTerm\n", rf.nextIndex[server], server)
+
+						rf.peerCond[server].Signal()
+						return
+					}
 				}
-			}
 
-			// Leader doesn't have XTerm
-			rf.nextIndex[server] = appendEntryRes.XIndex
-			fmt.Printf("Value of rf.nextIndex[server] : %d  of server: %d if  Leader doesn't have XTerm\n", rf.nextIndex[server], server)
-
+				// Leader doesn't have XTerm
+				rf.nextIndex[server] = appendEntryRes.XIndex
+				fmt.Printf("Value of rf.nextIndex[server] : %d  of server: %d if  Leader doesn't have XTerm\n", rf.nextIndex[server], server)
 		}
 		if rf.nextIndex[server] < 1 {
 			rf.nextIndex[server] = 1
@@ -260,8 +294,15 @@ func (rf *Raft) SendAppendEntries(
 	// Update nextIndex(because we always send get to the end of leader's log
 	// to send.
 	// So, rf.nextIndex[server] == logIndex = len(leader's log) - 1)
-	rf.matchIndex[server] = appendEntryReq.PrevLogIndex + len(appendEntryReq.Entries)
-	rf.nextIndex[server] = rf.matchIndex[server] + 1
+	// rf.matchIndex[server] = appendEntryReq.PrevLogIndex + len(appendEntryReq.Entries)
+	// rf.nextIndex[server] = rf.matchIndex[server] + 1
+
+	// TODO(namnh, 3D) : Change
+	if len(appendEntryReq.Entries) > 0 {
+		rf.nextIndex[server] = appendEntryReq.Entries[len(appendEntryReq.Entries)-1].Index + 1
+		rf.matchIndex[server] = rf.nextIndex[server] - 1
+	}
+
 	fmt.Printf("Value of rf.nextIndex[server] : %d  of server: %d appendEntryRes.Success == true\n", rf.nextIndex[server], server)
 
 	// if rf.matchIndex[server] >= len(rf.log) {
@@ -276,8 +317,8 @@ func (rf *Raft) SendAppendEntries(
 	for N > rf.commitIndex {
 		count := 0
 		for server := range rf.peers {
-			// TODO(namnh, 3D) : Change to adapt 3D
 			// if rf.matchIndex[server] >= N && rf.log[N].Term == rf.currentTerm {
+			// TODO(namnh, 3D) : CARE !!! BUG ???
 			if rf.matchIndex[server] >= N && rf.log[N-rf.log[0].Index].Term == rf.currentTerm {
 				count += 1
 			}
@@ -292,7 +333,7 @@ func (rf *Raft) SendAppendEntries(
 	// Reupdate leader's commitIndex if majority of node commit up to N-th index
 	rf.commitIndex = N
 	// Update state machine log
-	// TODO(namnh) : Should fix spurious wakeup
+	// TODO(namnh) : Should care thundering-herd
 	rf.cond.Broadcast()
 
 	// Leader MUST check to send log to follower's node or not. In case a node
@@ -327,7 +368,6 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs,
 
 	// reply's term = args's term because args.Term >= rf.currentTerm
 	reply.Term = args.Term
-
 	if args.Term > rf.currentTerm {
 		rf.votedFor = -1
 	}
@@ -337,22 +377,47 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs,
 	// Reupdate last time receive heartbeat message
 	rf.lastHeartbeatTimeRecv = time.Now().UnixMilli()
 
+	// // If log doesn't contain an entry at prevLogIndex
+	// // whose term matches prevLogTerm, return success = false
+	// if args.PrevLogIndex >= len(rf.log) {
+	// 	// TODO(namnh, 3D, IMPORTANT) : need to change ?
+	// 	reply.XLen = len(rf.log) - 1
+	// 	return
+	// }
+
+	// if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+	// 	// optimization
+	// 	conflictTerm := rf.log[args.PrevLogIndex].Term
+	// 	reply.XTerm = conflictTerm
+	// 	// Find the first index that stores term of conflicting entry
+	// 	// for i := args.PrevLogIndex; i >= 0; i-- {
+	// 	for i := 0; i <= args.PrevLogIndex; i++ {
+	// 		if rf.log[i].Term == conflictTerm {
+	// 			reply.XIndex = i
+	// 			return
+	// 		}
+	// 	}
+	// 	return
+	// }
+
+	// TODO(namnh, 3D) : Change
+	prevLogIndexInMem := args.PrevLogIndex - rf.log[0].Index
 	// If log doesn't contain an entry at prevLogIndex
 	// whose term matches prevLogTerm, return success = false
-	if args.PrevLogIndex >= len(rf.log) {
-		reply.XLen = len(rf.log) - 1
+	if prevLogIndexInMem >= len(rf.log) {
+		// TODO(namnh, 3D, IMPORTANT) : need to change ?
+		reply.XLen = rf.log[len(rf.log)-1].Index
 		return
 	}
 
-	if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+	if rf.log[prevLogIndexInMem].Term != args.PrevLogTerm {
 		// optimization
-		conflictTerm := rf.log[args.PrevLogIndex].Term
+		conflictTerm := rf.log[prevLogIndexInMem].Term
 		reply.XTerm = conflictTerm
 		// Find the first index that stores term of conflicting entry
-		// for i := args.PrevLogIndex; i >= 0; i-- {
-		for i := 0; i <= args.PrevLogIndex; i++ {
+		for i := 0; i <= prevLogIndexInMem; i++ {
 			if rf.log[i].Term == conflictTerm {
-				reply.XIndex = i
+				reply.XIndex = i + rf.log[0].Index
 				return
 			}
 		}
@@ -367,17 +432,20 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs,
 	numEntries := 0
 	for _, entry := range args.Entries {
 		logEntryIndex := entry.Index
+		logEntryIndexInMem := logEntryIndex - rf.log[0].Index
 		logEntryTerm := entry.Term
 
-		if logEntryIndex < len(rf.log) && logEntryTerm == rf.log[logEntryIndex].Term {
+		if logEntryIndexInMem < len(rf.log) &&
+			 logEntryTerm == rf.log[logEntryIndexInMem].Term {
 			numEntries++
 			continue
 		}
 
-		if logEntryIndex < len(rf.log) && logEntryTerm != rf.log[logEntryIndex].Term ||
-			logEntryIndex >= len(rf.log) {
+		if logEntryIndexInMem < len(rf.log) &&
+		   (logEntryTerm != rf.log[logEntryIndexInMem].Term ||
+			 logEntryIndexInMem >= len(rf.log)) {
 			// delete the existing entry and all that follow it
-			rf.log = rf.log[:logEntryIndex]
+			rf.log = rf.log[:logEntryIndexInMem]
 			// In case condition is hit, all following entry after logEntryIndex was deleted.
 			// Then new log entries form leader following logEntryIndex couldn't be found
 			// So, we can skip the loop and just append remaining entries to node's log
@@ -392,7 +460,7 @@ func (rf *Raft) AppendEntries(args *RequestAppendEntriesArgs,
 	}
 
 	fmt.Printf("Log of follower node : %d after handling append entry request\n", rf.me)
-	fmt.Println("Log of followern node append entry !!!", rf.log)
+	fmt.Println("Log of follower node append entry !!!", rf.log)
 
 	// TODO(namnh) : Should care about thundering herd
 	rf.cond.Broadcast()

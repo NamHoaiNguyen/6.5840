@@ -169,11 +169,12 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		// 7. Discard the entire log
 		rf.log = rf.log[:0]
 		// Use snapshot as dummy entry
-		rf.log[0] = LogEntry{
-			Index:   args.LastIncludedIndex,
-			Term:    args.LastIncludedTerm,
-			Command: nil,
-		}
+		rf.log = append(rf.log,
+			LogEntry{
+				Index:   args.LastIncludedIndex,
+				Term:    args.LastIncludedTerm,
+				Command: nil,
+			} )
 		fmt.Printf("Log of follower node: %d after discall ENTIRELY when receing install snapshot request from leader\n", rf.me)
 		fmt.Println("All log", rf.log)
 	} else {
