@@ -4,7 +4,7 @@ declare -A pass_count
 declare -A fail_count
 declare -a ordered_subtests  # indexed array for order tracking
 
-for i in {1..100}; do
+for i in {1..350}; do
   echo "================= Run #$i ================="
 
   output=$(go test -v -run 3A 2>&1)

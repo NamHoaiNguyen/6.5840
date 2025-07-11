@@ -3,7 +3,7 @@
 # List of tests to run
 tests=("TestPersist13C" "TestPersist23C" "TestPersist33C" "TestFigure83C"
        "TestUnreliableAgree3C" "TestFigure8Unreliable3C" "TestReliableChurn3C" "TestUnreliableChurn3C")
-NUM_RUNS=50
+NUM_RUNS=40
 
 # Initialize counters
 declare -A pass_count

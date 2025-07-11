@@ -75,6 +75,8 @@ type Raft struct {
 	// Specific for Lab
 	applyCh chan raftapi.ApplyMsg
 
+	snapshotMsg *raftapi.ApplyMsg
+
 	cond *sync.Cond
 
 	peerCond []*sync.Cond
@@ -108,9 +110,10 @@ func (rf *Raft) persist() {
 	// Your code here (3C).
 	if rf.persister.ReadSnapshot() != nil {
 		rf.persister.Save(rf.encodeState(), rf.persister.ReadSnapshot())
-	} else {
-		rf.persister.Save(rf.encodeState(), nil)
+		return
 	}
+
+	rf.persister.Save(rf.encodeState(), nil)
 }
 
 // restore previously persisted state.
@@ -144,6 +147,7 @@ func (rf *Raft) encodeState() []byte {
 	e.Encode(rf.currentTerm)
 	e.Encode(rf.votedFor)
 	e.Encode(rf.log)
+
 	return w.Bytes()
 }
 
@@ -160,6 +164,16 @@ func (rf *Raft) PersistBytes() int {
 // that index. Raft should now trim its log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (3D).
+	rf.cond.L.Lock()
+	defer rf.cond.L.Unlock()
+
+	// Truncate the log(keep index 0-th)
+	// MUST remove dump entry at 0-th index and replace it
+	// with entry at index-th
+	rf.log = append([]LogEntry{}, rf.log[index-rf.log[0].Index:]...)
+	rf.log[0].Command = nil
+
+	rf.persister.Save(rf.encodeState(), snapshot)
 }
 
 // the service using Raft (e.g. a k/v server) wants to start
@@ -271,6 +285,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	rf.nextIndex = make([]int, len(rf.peers))
 	rf.matchIndex = make([]int, len(rf.peers))
+
+	// Snapshot
+	rf.snapshotMsg = nil
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
