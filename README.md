@@ -8,11 +8,11 @@ This repository contains the lab code I implemented for MIT 6.5840 Spring 2025 (
 - [x] Lab 3B: log
 - [x] Lab 3C: persistence
 - [x] Lab 3D: log compaction
-- [] Lab 4A:  replicated state machine (RSM)
-- [] Lab 4B: Key/value service without snapshots
-- [] Lab 4C: Key/value service with snapshots
-- [] Lab 5A: Moving shards
-- [] Lab 5B: Handling a failed controller
-- [] Lab 5C: Concurrent configuration changes
+- [ ] Lab 4A:  replicated state machine (RSM)
+- [ ] Lab 4B: Key/value service without snapshots
+- [ ] Lab 4C: Key/value service with snapshots
+- [ ] Lab 5A: Moving shards
+- [ ] Lab 5B: Handling a failed controller
+- [ ] Lab 5C: Concurrent configuration changes
 
 
