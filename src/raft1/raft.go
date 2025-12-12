@@ -297,7 +297,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// Leader periodically send heartbeat to other nodes
 	go rf.SendHeartbeats()
 	// Background task which update log to state machine
-	go rf.UpdateStateMachineLog()
+	go rf.ApplyLog()
 	// Init retry sending message
 	for server := range rf.peers {
 		if server == rf.me {

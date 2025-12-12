@@ -30,7 +30,7 @@ type RequestAppendEntriesReply struct {
 }
 
 // Goroutine
-func (rf *Raft) UpdateStateMachineLog() {
+func (rf *Raft) ApplyLog() {
 	for !rf.killed() {
 		rf.cond.L.Lock()
 
@@ -239,6 +239,7 @@ func (rf *Raft) SendAppendEntries(
 		rf.matchIndex[server] = rf.nextIndex[server] - 1
 	}
 
+	// Recalculate commitIndex in Leader
 	N := rf.log[len(rf.log)-1].Index
 	for N > rf.commitIndex {
 		count := 0
