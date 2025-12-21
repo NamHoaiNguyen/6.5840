@@ -239,7 +239,11 @@ func (rf *Raft) SendAppendEntries(
 		rf.matchIndex[server] = rf.nextIndex[server] - 1
 	}
 
+<<<<<<< HEAD
 	// Recalculate commitIndex in Leader
+=======
+	// Reupdate leader's commitIndex
+>>>>>>> 308c866 (Add comment for Raft)
 	N := rf.log[len(rf.log)-1].Index
 	for N > rf.commitIndex {
 		count := 0
@@ -250,12 +254,13 @@ func (rf *Raft) SendAppendEntries(
 		}
 
 		if count > len(rf.peers)/2 {
+			// if majority of node commit up to N-th index, exit
 			break
 		}
 
+		// Continue until finding the consensus logindex
 		N -= 1
 	}
-	// Reupdate leader's commitIndex if majority of node commit up to N-th index
 	rf.commitIndex = N
 	// Update state machine log
 	// TODO(namnh) : Should care thundering-herd
@@ -360,6 +365,7 @@ func (rf *Raft) AppendEntries(
 	rf.log = append(rf.log, args.Entries[numEntries:]...)
 
 	if args.LeaderCommit > rf.commitIndex {
+		// Update commit index of follower node
 		rf.commitIndex = min(args.LeaderCommit, rf.log[len(rf.log)-1].Index)
 	}
 

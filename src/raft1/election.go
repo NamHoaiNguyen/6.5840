@@ -39,6 +39,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	reply.VoteGranted = false
 	if rf.currentTerm > args.Term {
+		// If receiving a request that its term < node's current term,
+		// reject this request and update request's term = node's current term
 		reply.Term = rf.currentTerm
 		return
 	}

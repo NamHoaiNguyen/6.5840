@@ -232,6 +232,7 @@ func (rf *Raft) Kill() {
 }
 
 func (rf *Raft) killed() bool {
+	// func (rf *Raft) Killed() bool {
 	z := atomic.LoadInt32(&rf.dead)
 	return z == 1
 }
