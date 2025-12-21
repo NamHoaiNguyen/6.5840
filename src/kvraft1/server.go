@@ -7,8 +7,7 @@ import (
 	"6.5840/kvsrv1/rpc"
 	"6.5840/labgob"
 	"6.5840/labrpc"
-	"6.5840/tester1"
-
+	tester "6.5840/tester1"
 )
 
 type KVServer struct {
@@ -42,12 +41,15 @@ func (kv *KVServer) Get(args *rpc.GetArgs, reply *rpc.GetReply) {
 	// Your code here. Use kv.rsm.Submit() to submit args
 	// You can use go's type casts to turn the any return value
 	// of Submit() into a GetReply: rep.(rpc.GetReply)
+	// TODO(namnh) : Each get spawn a goroutine
 }
 
 func (kv *KVServer) Put(args *rpc.PutArgs, reply *rpc.PutReply) {
 	// Your code here. Use kv.rsm.Submit() to submit args
 	// You can use go's type casts to turn the any return value
 	// of Submit() into a PutReply: rep.(rpc.PutReply)
+	// TODO(namnh) : Each get spawn a goroutine
+
 }
 
 // the tester calls Kill() when a KVServer instance won't
@@ -79,8 +81,9 @@ func StartKVServer(servers []*labrpc.ClientEnd, gid tester.Tgid, me int, persist
 
 	kv := &KVServer{me: me}
 
-
 	kv.rsm = rsm.MakeRSM(servers, me, persister, maxraftstate, kv)
 	// You may need initialization code here.
+	// TODO(namnh) : reader goroutine
+	go kv.rsm.Execute()
 	return []tester.IService{kv, kv.rsm.Raft()}
 }
