@@ -239,11 +239,7 @@ func (rf *Raft) SendAppendEntries(
 		rf.matchIndex[server] = rf.nextIndex[server] - 1
 	}
 
-<<<<<<< HEAD
-	// Recalculate commitIndex in Leader
-=======
 	// Reupdate leader's commitIndex
->>>>>>> 308c866 (Add comment for Raft)
 	N := rf.log[len(rf.log)-1].Index
 	for N > rf.commitIndex {
 		count := 0
