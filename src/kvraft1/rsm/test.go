@@ -2,15 +2,16 @@ package rsm
 
 import (
 	//"log"
+	"fmt"
+	"log"
 	"sync"
 	"testing"
 	"time"
-	"fmt"
 
 	"6.5840/kvsrv1/rpc"
 	"6.5840/labrpc"
 	"6.5840/raftapi"
-	"6.5840/tester1"
+	tester "6.5840/tester1"
 )
 
 type Test struct {
@@ -68,7 +69,7 @@ func inPartition(s int, p []int) bool {
 func (ts *Test) onePartition(p []int, req any) any {
 	// try all the servers, maybe one is the leader but give up after NSEC
 	t0 := time.Now()
-	for time.Since(t0).Seconds() < NSEC {
+	for time.Since(t0).Seconds() < 100 {
 		ts.mu.Lock()
 		index := ts.leader
 		ts.mu.Unlock()
@@ -89,7 +90,7 @@ func (ts *Test) onePartition(p []int, req any) any {
 			index = (index + 1) % len(ts.srvs)
 		}
 		time.Sleep(50 * time.Millisecond)
-		//log.Printf("try again: no leader")
+		log.Printf("try again: no leader")
 	}
 	return nil
 }

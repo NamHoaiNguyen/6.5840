@@ -27,7 +27,7 @@ type RequestVoteReply struct {
 // NEED to acquire lock before calling
 func (rf *Raft) ResetElectionTimeout() {
 	newElectionTimeout := 350 + (rand.Int63() % 200)
-	rf.electInterval = newElectionTimeout
+	rf.electInterval = int64(newElectionTimeout)
 }
 
 // RequestVote RPC handler.
